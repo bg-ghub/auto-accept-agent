@@ -1,64 +1,29 @@
 # Auto Accept Agent
 
-**Automate AI code acceptance with a single toggle.**
+![demo](media/demo.gif)
+![cursor demo](media/cursor_demo.gif)
 
----
+Auto Accept Agent is an extension that instantly accepts agent file edits and terminal commands for you.
 
-## How It Works
+## Features
+- Instant and performant
+- Supports both Cursor and Antigravity
+- One-click toggle from the status bar with a clear OFF highlight
+- Works even when the window is not focused
+- Configure settings via `Auto Accept: Settings & Pro` command
 
-### Antigravity (VS Code)
-Toggle ON → Extension auto-accepts Antigravity suggestions. No setup required.
+![alt text](media/image.png)
 
-### Cursor
-1. Toggle ON → "Launch Cursor with Auto-Accept?" appears
-2. Click **Launch Cursor** → New Cursor window opens with debugging enabled
-3. In the **new window**, toggle ON → Auto-accept starts working
+## Resilient Mode (Pro - $5/mo or $29/yr)
+- **Auto-Recovery**: Automatically detects and recovers when the agent gets stuck (e.g. "buttons not clicking").
+- **Background operation**: Works efficiently even when the window is not focused.
+- **Multi-Instance**: Run multiple IDE windows simultaneously.
+- **Adjustable Speed**: Fine-tune polling frequency to save ticks or maximize speed.
+- **Analytics**: Track clicks and sessions saved.
 
-**Why the extra step?** Cursor doesn't expose the APIs needed for auto-accept. Launching with debugging enabled allows the extension to inject the auto-clicker.
+## Installation
+- Just click download if you are in Antigravity or Cursor already
+- Install the vsix file locally if you are in VS code marketplace, then restart your IDE
 
----
 
-## Usage
 
-| Action | How |
-|--------|-----|
-| Toggle | Click `Auto Accept: ON/OFF` in status bar |
-| Manual trigger | Command Palette → `Auto Accept: Accept Now` |
-
-**Buttons clicked automatically:**
-- Accept All / Accept
-- Apply All / Apply
-- Run Command / Run
-- Keep All / Confirm
-
-**Ignored:** Skip, Cancel, Reject, Discard
-
----
-
-## Multi-Instance Support
-
-Each time you click "Launch Cursor", a new instance opens on the next available port (9222, 9223, etc.). The extension connects to all instances automatically.
-
----
-
-## Troubleshooting
-
-**Status shows "ON (0 CDP)"**
-- CDP not connected. Make sure you launched Cursor via the extension's "Launch Cursor" button.
-
-**Buttons not being clicked**
-- Ensure the panel with buttons is visible
-- Check that the extension shows "ON" with a connection count
-
----
-
-## Requirements
-
-- VS Code 1.75.0 or later
-- For Cursor: Must launch via extension (or with `--remote-debugging-port=9222`)
-
----
-
-## License
-
-MIT - see [LICENSE.md](LICENSE.md)

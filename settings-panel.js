@@ -1,22 +1,49 @@
-/**
- * Settings Panel
- * Webview panel for frequency adjustment and usage analytics
- * Pro features: Frequency slider, Analytics view
- */
-
 const vscode = require('vscode');
+const { STRIPE_LINKS } = require('./config');
 
-const CHECKOUT_URL = 'https://buy.stripe.com/cNi7sL02BcybgHBats9MY0q';
 const LICENSE_API = 'https://auto-accept-backend.onrender.com/api';
 
 class SettingsPanel {
     static currentPanel = undefined;
     static viewType = 'autoAcceptSettings';
 
-    constructor(panel, extensionUri, context) {
+    static createOrShow(extensionUri, context, mode = 'settings') {
+        const column = vscode.window.activeTextEditor
+            ? vscode.window.activeTextEditor.viewColumn
+            : undefined;
+
+        // If we already have a panel, show it.
+        if (SettingsPanel.currentPanel) {
+            // If requesting prompt mode but panel is open, reveal it and update mode
+            SettingsPanel.currentPanel.panel.reveal(column);
+            SettingsPanel.currentPanel.updateMode(mode);
+            return;
+        }
+
+        // Otherwise, create a new panel.
+        const panel = vscode.window.createWebviewPanel(
+            SettingsPanel.viewType,
+            mode === 'prompt' ? 'Auto Accept Agent' : 'Auto Accept Settings',
+            column || vscode.ViewColumn.One,
+            {
+                enableScripts: true,
+                localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')],
+                retainContextWhenHidden: true
+            }
+        );
+
+        SettingsPanel.currentPanel = new SettingsPanel(panel, extensionUri, context, mode);
+    }
+
+    static showUpgradePrompt(context) {
+        SettingsPanel.createOrShow(context.extensionUri, context, 'prompt');
+    }
+
+    constructor(panel, extensionUri, context, mode) {
         this.panel = panel;
         this.extensionUri = extensionUri;
         this.context = context;
+        this.mode = mode; // 'settings' | 'prompt'
         this.disposables = [];
 
         this.update();
@@ -46,13 +73,40 @@ class SettingsPanel {
                         }
                         break;
                     case 'upgrade':
-                        this.openUpgrade();
+                        // Existing upgrade logic (maybe from Settings mode)
+                        // For prompt mode, links are direct <a> tags usually, but if we need logic:
+                        this.openUpgrade(message.promoCode); // Keeps existing logic for legacy/settings
+                        this.startPolling(this.getUserId());
+                        break;
+                    case 'checkPro':
+                        this.handleCheckPro();
+                        break;
+                    case 'dismissPrompt':
+                        await this.handleDismiss();
                         break;
                 }
             },
             null,
             this.disposables
         );
+    }
+
+    async handleDismiss() {
+        // Persist dismissal timestamp
+        const now = Date.now();
+        await this.context.globalState.update('auto-accept-lastDismissedAt', now);
+        this.dispose();
+    }
+
+    async handleCheckPro() {
+        const isPro = await this.checkProStatus(this.getUserId());
+        if (isPro) {
+            await this.context.globalState.update('auto-accept-isPro', true);
+            vscode.window.showInformationMessage('Auto Accept: Pro status verified!');
+            this.update();
+        } else {
+            vscode.window.showWarningMessage('Pro license not found yet. It usually takes 1-2 minutes to sync.');
+        }
     }
 
     isPro() {
@@ -73,28 +127,15 @@ class SettingsPanel {
         return userId;
     }
 
-    openUpgrade() {
-        const userId = this.getUserId();
-        const url = `${CHECKOUT_URL}?client_reference_id=${userId}`;
-        vscode.env.openExternal(vscode.Uri.parse(url));
+    openUpgrade(promoCode) {
+         // Fallback legacy method or used by Settings
+         // We might not need this if we use direct links, but keeping for compatibility
     }
 
-    static createOrShow(extensionUri, context) {
-        const column = vscode.ViewColumn.Beside;
-
-        if (SettingsPanel.currentPanel) {
-            SettingsPanel.currentPanel.panel.reveal(column);
-            return;
-        }
-
-        const panel = vscode.window.createWebviewPanel(
-            SettingsPanel.viewType,
-            'Auto Accept',
-            column,
-            { enableScripts: true }
-        );
-
-        SettingsPanel.currentPanel = new SettingsPanel(panel, extensionUri, context);
+    updateMode(mode) {
+        this.mode = mode;
+        this.panel.title = mode === 'prompt' ? 'Auto Accept Agent' : 'Auto Accept Settings';
+        this.update();
     }
 
     sendStats() {
@@ -103,8 +144,9 @@ class SettingsPanel {
             sessions: 0,
             lastSession: null
         });
-        const frequency = this.context.globalState.get('auto-accept-frequency', 1000);
         const isPro = this.isPro();
+        // If not Pro, force display of 300ms
+        const frequency = isPro ? this.context.globalState.get('auto-accept-frequency', 1000) : 300;
 
         this.panel.webview.postMessage({
             command: 'updateStats',
@@ -121,492 +163,273 @@ class SettingsPanel {
 
     getHtmlContent() {
         const isPro = this.isPro();
+        const isPrompt = this.mode === 'prompt';
+        const stripeLinks = STRIPE_LINKS; // { MONTHLY, YEARLY }
 
-        return `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto Accept</title>
-    <style>
-        :root {
-            --bg-color: #050505;
-            --card-bg: #0f0f0f;
-            --border-color: #222;
-            --accent-color: #9333ea;
-            --accent-glow: rgba(147, 51, 234, 0.4);
-            --text-primary: #ffffff;
-            --text-secondary: #888;
-            --success: #22c55e;
-            --font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: var(--font-family);
-            background: var(--bg-color);
-            color: var(--text-primary);
-            padding: 32px 24px;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-        }
-        
-        .container {
-            width: 100%;
-            max-width: 420px;
-            display: flex;
-            flex-direction: column;
-            gap: 24px;
-        }
-        
-        /* HEADER */
-        .header {
-            margin-bottom: 8px;
-        }
-
-        h1 {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 4px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            letter-spacing: -0.5px;
-        }
-        
-        .pro-badge {
-            background: linear-gradient(135deg, #a855f7, #7c3aed);
-            font-size: 10px;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            box-shadow: 0 0 10px var(--accent-glow);
-        }
-        
-        .subtitle {
-            color: var(--text-secondary);
-            font-size: 13px;
-        }
-        
-        /* UPGRADE CARD */
-        .upgrade-card {
-            background: linear-gradient(145deg, #111, #0a0a0a);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 24px;
-            text-align: center;
-            position: relative;
-            overflow: hidden;
-            box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5);
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .upgrade-card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0; height: 1px;
-            background: linear-gradient(90deg, transparent, var(--accent-color), transparent);
-            opacity: 0.5;
-        }
-
-        .upgrade-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 15px 50px -12px rgba(147, 51, 234, 0.15);
-            border-color: #333;
-        }
-        
-        .upgrade-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 6px;
-            background: linear-gradient(to right, #fff, #ccc);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        
-        .upgrade-desc {
-            font-size: 13px;
-            color: var(--text-secondary);
-            margin-bottom: 20px;
-        }
-        
-        .feature-list {
-            text-align: left;
-            margin: 0 auto 24px;
-            font-size: 13px;
-            color: #ccc;
-            display: inline-block;
-        }
-        
-        .feature-list li {
-            margin: 10px 0;
-            list-style: none;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .check-icon {
-            color: var(--accent-color);
-            font-weight: bold;
-            font-size: 14px;
-        }
-
-        .highlight {
-            color: #fff;
-            font-weight: 500;
-        }
-        
-        /* BUTTONS */
-        .btn-primary {
-            background: var(--accent-color);
-            border: none;
-            color: white;
-            padding: 14px 0;
-            width: 100%;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-            box-shadow: 0 4px 15px var(--accent-glow);
-        }
-        
-        .btn-primary:hover {
-            background: #a855f7;
-            transform: translateY(-1px);
-            box-shadow: 0 6px 20px var(--accent-glow);
-        }
-
-        .btn-secondary {
-            background: transparent;
-            border: 1px solid var(--border-color);
-            color: var(--text-secondary);
-            padding: 8px 16px;
-            border-radius: 6px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-            margin-top: 16px;
-        }
-
-        .btn-secondary:hover {
-            border-color: var(--text-primary);
-            color: var(--text-primary);
-        }
-        
-        .subtext {
-            font-size: 11px;
-            color: #555;
-            margin-top: 10px;
-        }
-        
-        /* SECTIONS */
-        .section-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 12px;
-        }
-
-        .section-title {
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 600;
-            color: #555;
-        }
-        
-        .pro-tag {
-            background: #222;
-            color: var(--accent-color);
-            font-size: 9px;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            border: 1px solid #333;
-        }
-        
-        .card {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 20px;
-        }
-        
-        /* SLIDER */
-        .locked {
-            opacity: 0.4;
-            pointer-events: none;
-            position: relative;
-            filter: grayscale(0.8);
-        }
-        
-        .lock-overlay {
-            position: absolute;
-            top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.8);
-            width: 40px; height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            border: 1px solid #333;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-            z-index: 10;
-        }
-
-        .metric-value {
-            font-size: 36px;
-            font-weight: 300;
-            color: var(--accent-color);
-            margin-bottom: 16px;
-            letter-spacing: -1px;
-        }
-        
-        .metric-value span {
-            font-size: 14px;
-            color: var(--text-secondary);
-            margin-left: 6px;
-            font-weight: 400;
-        }
-        
-        input[type="range"] {
-            width: 100%;
-            height: 4px;
-            background: #333;
-            border-radius: 2px;
-            outline: none;
-            -webkit-appearance: none;
-            cursor: pointer;
-        }
-        
-        input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 18px;
-            height: 18px;
-            background: var(--text-primary);
-            border-radius: 50%;
-            cursor: pointer;
-            box-shadow: 0 0 10px rgba(255,255,255,0.3);
-            border: 2px solid var(--bg-color);
-        }
-        
-        .range-labels {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 10px;
-            font-size: 11px;
-            color: #444;
-            font-weight: 500;
-        }
-        
-        /* ANALYTICS */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-        }
-        
-        .stat-box {
-            background: #141414;
-            border-radius: 10px;
-            padding: 16px;
-            border: 1px solid #222;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
-        
-        .stat-label {
-            font-size: 11px;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-top: 4px;
-        }
-        
-        .stat-number {
-            font-size: 24px;
-            font-weight: 600;
-            color: #fff;
-        }
-        
-        .stat-box.primary .stat-number {
-            color: var(--accent-color);
-        }
-        
-        .footer {
-            margin-top: 32px;
-            text-align: center;
-            font-size: 11px;
-            color: #333;
-            font-weight: 500;
-        }
-
-        .user-id {
-            color: #222;
-            font-size: 10px;
-            margin-top: 8px;
-            cursor: pointer;
-            transition: color 0.2s;
-        }
-        .user-id:hover { color: #555; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <h1>Auto Accept ${isPro ? '<span class="pro-badge">PRO</span>' : ''}</h1>
-            <div class="subtitle">Automate your AI workflow</div>
-        </div>
-        
-        <!-- Upgrade Card -->
-        ${!isPro ? `
-        <div class="upgrade-card">
-            <div class="upgrade-title">Level Up Your Workflow</div>
-            <div class="upgrade-desc">Let AI work while you're away</div>
-            
-            <ul class="feature-list">
-                <li><span class="check-icon">✓</span> <span class="highlight">Background operation</span> - works unfocused</li>
-                <li><span class="check-icon">✓</span> Run multiple instances simultaneously</li>
-                <li><span class="check-icon">✓</span> Adjust polling speed</li>
-                <li><span class="check-icon">✓</span> Track time saved analytics</li>
-            </ul>
-            
-            <button class="btn-primary" id="upgradeBtn">Unlock Lifetime Access - $4.99</button>
-            <div class="subtext">One-time payment • Forever access</div>
-        </div>
-        ` : ''}
-        
-        <!-- Frequency Section -->
-        <div>
-            <div class="section-header">
-                <span class="section-title">Polling Speed</span>
-                ${!isPro ? '<span class="pro-tag">PRO</span>' : ''}
-            </div>
-            
-            <div class="card ${!isPro ? 'locked' : ''}">
-                ${!isPro ? '<div class="lock-overlay">🔒</div>' : ''}
-                
-                <div class="metric-value" id="frequencyValue">1.0<span>sec</span></div>
-                <input type="range" id="frequencySlider" min="200" max="3000" step="100" value="1000" ${!isPro ? 'disabled' : ''}>
-                <div class="range-labels">
-                    <span>Fast (0.2s)</span>
-                    <span>Slow (3.0s)</span>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Analytics Section -->
-        <div>
-            <div class="section-header">
-                <span class="section-title">Impact</span>
-                ${!isPro ? '<span class="pro-tag">PRO</span>' : ''}
-            </div>
-            
-            <div class="${!isPro ? 'locked' : ''}">
-                ${!isPro ? '<div class="lock-overlay" style="z-index:11">🔒</div>' : ''}
-                
-                <div class="stats-grid">
-                    <div class="stat-box primary">
-                        <div class="stat-number" id="clickCount">${isPro ? '0' : '—'}</div>
-                        <div class="stat-label">Clicks</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-number" id="sessionCount">${isPro ? '0' : '—'}</div>
-                        <div class="stat-label">Sessions</div>
-                    </div>
-                </div>
-                
-                ${isPro ? '<button class="btn-secondary" id="resetBtn">Reset Data</button>' : ''}
-            </div>
-        </div>
-        
-        <div class="footer">
-            <div>Auto Accept Agent v2.9.5</div>
-            <div class="user-id" id="userId" title="Click to copy">ID: ${this.getUserId()}</div>
-        </div>
-    </div>
-    
-    <script>
-        const vscode = acquireVsCodeApi();
-        const isPro = ${isPro};
-        
-        const slider = document.getElementById('frequencySlider');
-        const valueDisplay = document.getElementById('frequencyValue');
-        const clickCount = document.getElementById('clickCount');
-        const sessionCount = document.getElementById('sessionCount');
-        const btnText = document.getElementById('upgradeBtn');
-        const userIdEl = document.getElementById('userId');
-
-        if (userIdEl) {
-            userIdEl.addEventListener('click', () => {
-                const text = userIdEl.textContent.replace('ID: ', '');
-                navigator.clipboard.writeText(text);
-                userIdEl.textContent = 'Copied!';
-                setTimeout(() => userIdEl.textContent = 'ID: ' + text, 1500);
-            });
-        }
-        
-        if (isPro && slider) {
-            slider.addEventListener('input', (e) => {
-                const ms = parseInt(e.target.value);
-                valueDisplay.innerHTML = (ms / 1000).toFixed(1) + '<span>sec</span>';
-                vscode.postMessage({ command: 'setFrequency', value: ms });
-            });
-        }
-        
-        const resetBtn = document.getElementById('resetBtn');
-        if (resetBtn) {
-            resetBtn.addEventListener('click', () => {
-                vscode.postMessage({ command: 'resetStats' });
-            });
-        }
-        
-        const upgradeBtn = document.getElementById('upgradeBtn');
-        if (upgradeBtn) {
-            upgradeBtn.addEventListener('click', () => {
-                vscode.postMessage({ command: 'upgrade' });
-            });
-        }
-        
-        window.addEventListener('message', (event) => {
-            const message = event.data;
-            if (message.command === 'updateStats' && message.isPro) {
-                clickCount.textContent = message.stats.clicks || 0;
-                sessionCount.textContent = message.stats.sessions || 0;
-                if (slider) {
-                    slider.value = message.frequency;
-                    valueDisplay.innerHTML = (message.frequency / 1000).toFixed(1) + '<span>sec</span>';
-                }
+        // Common CSS
+        const css = `
+            :root {
+                --bg-color: var(--vscode-editor-background);
+                --fg-color: var(--vscode-editor-foreground);
+                --accent: #9333ea;
+                --border: var(--vscode-widget-border);
             }
-        });
-        
-        vscode.postMessage({ command: 'getStats' });
-    </script>
-</body>
-</html>`;
+            body {
+                font-family: var(--vscode-font-family);
+                background: var(--bg-color);
+                color: var(--fg-color);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+                margin: 0;
+                padding: 20px;
+            }
+            .container {
+                max-width: ${isPrompt ? '500px' : '600px'};
+                width: 100%;
+            }
+            .btn-primary {
+                background: var(--accent);
+                color: white;
+                border: none;
+                padding: 12px;
+                width: 100%;
+                border-radius: 6px;
+                font-weight: 600;
+                cursor: pointer;
+                text-decoration: none;
+                display: block;
+                text-align: center;
+                box-sizing: border-box;
+                margin-top: 10px;
+            }
+            .btn-primary:hover {
+                opacity: 0.9;
+            }
+            .link-secondary {
+                color: var(--vscode-textLink-foreground);
+                cursor: pointer;
+                text-decoration: none;
+                font-size: 13px;
+                display: block;
+                text-align: center;
+                margin-top: 16px;
+            }
+            .link-secondary:hover { text-decoration: underline; }
+            
+            /* Prompt Specific */
+            .prompt-card {
+                background: var(--vscode-sideBar-background);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 32px;
+                text-align: center;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            }
+            .prompt-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+            .prompt-text { font-size: 14px; opacity: 0.8; line-height: 1.5; margin-bottom: 24px; }
+
+            /* Settings Specific */
+            .settings-card { /* ... existing styles condensed ... */ }
+        `;
+
+        if (isPrompt) {
+            return `<!DOCTYPE html>
+            <html>
+            <head><style>${css}</style></head>
+            <body>
+                <div class="container">
+                    <div class="prompt-card">
+                        <div class="prompt-title">Agent appears stuck</div>
+                        <div class="prompt-text">
+                            Cursor's auto-accept rules failed to continue execution.<br/><br/>
+                            Auto Accept Pro can automatically recover stalled agents so you don't have to babysit them.
+                        </div>
+                        <a href="${stripeLinks.MONTHLY}" class="btn-primary">
+                            🔓 Enable Resilient Mode (Pro) - $5/mo
+                        </a>
+                        <a href="${stripeLinks.YEARLY}" class="btn-primary" style="background: transparent; border: 1px solid var(--border); margin-top: 8px;">
+                            Or $29/year (Save 50%)
+                        </a>
+
+                        <a class="link-secondary" onclick="dismiss()">
+                            Keep waiting (agent remains paused)
+                        </a>
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.5; margin-top: 20px; text-align: center;">
+                        User ID: ${this.getUserId()}
+                    </div>
+                </div>
+                <script>
+                    const vscode = acquireVsCodeApi();
+                    function dismiss() {
+                        vscode.postMessage({ command: 'dismissPrompt' });
+                    }
+                </script>
+            </body>
+            </html>`;
+        }
+
+        // Settings Mode (Legacy/Existing but cleaner)
+        // I will essentially recreate a simplified version of the old HTML for 'settings' mode
+        // referencing the config links.
+        return `<!DOCTYPE html>
+        <html>
+        <head>
+            <style>${css}</style>
+            <style>
+                .settings-header { text-align: center; margin-bottom: 30px; }
+                .settings-section { background: rgba(255,255,255,0.03); padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+                label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 600; opacity: 0.7; }
+                input[type=range] { width: 100%; }
+                .val-display { float: right; font-family: monospace; }
+                .pro-badge { background: var(--accent); color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; }
+                .locked { opacity: 0.5; pointer-events: none; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="settings-header">
+                    <h1>Auto Accept ${isPro ? '<span class="pro-badge">PRO</span>' : ''}</h1>
+                    <div style="opacity: 0.7">Automate your AI workflow</div>
+                </div>
+
+                ${!isPro ? `
+                <div class="settings-section" style="border: 1px solid var(--accent);">
+                    <div style="font-weight: 600; margin-bottom: 8px;">Upgrade to Pro</div>
+                    <div style="font-size: 13px; margin-bottom: 16px; opacity: 0.8;">
+                        • Background operation<br/>
+                        • Multiple instances<br/>
+                        • Adjustable speed<br/>
+                        • Auto-recovery logic
+                    </div>
+                    <a href="${stripeLinks.MONTHLY}" class="btn-primary">Subscribe Monthly ($5/mo)</a>
+                    <a href="${stripeLinks.YEARLY}" class="btn-primary" style="background: transparent; border: 1px solid var(--border);">Subscribe Yearly ($29/yr)</a>
+                    <div class="link-secondary" id="checkStatusBtn">Already paid? Check status</div>
+                </div>
+                ` : ''}
+
+                <div class="settings-section">
+                    <label>POLLING FREQUENCY <span class="val-display" id="freqVal">...</span></label>
+                    <div class="${!isPro ? 'locked' : ''}">
+                        <input type="range" id="freqSlider" min="200" max="3000" step="100" value="1000">
+                    </div>
+                    ${!isPro ? '<div style="font-size: 11px; margin-top: 4px; color: var(--accent);">⚠ Upgrade to adjust speed</div>' : ''}
+                </div>
+
+                 <div class="settings-section">
+                    <label>ANALYTICS</label>
+                    <div style="display: flex; justify-content: space-between; margin-top: 10px;">
+                        <div>
+                            <div style="font-size: 24px" id="clickCount">0</div>
+                            <div style="font-size: 11px; opacity: 0.6">Clicks</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 24px" id="sessionCount">0</div>
+                            <div style="font-size: 11px; opacity: 0.6">Sessions</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="text-align: center; font-size: 11px; opacity: 0.4; margin-top: 40px;">
+                    ID: ${this.getUserId()}
+                </div>
+            </div>
+
+            <script>
+                const vscode = acquireVsCodeApi();
+                
+                // ... Simple event listeners for slider, check status ...
+                document.getElementById('checkStatusBtn')?.addEventListener('click', () => {
+                    const el = document.getElementById('checkStatusBtn');
+                    el.innerText = 'Checking...';
+                    vscode.postMessage({ command: 'checkPro' });
+                });
+
+                const slider = document.getElementById('freqSlider');
+                const valDisplay = document.getElementById('freqVal');
+                
+                if (slider) {
+                    slider.addEventListener('input', (e) => {
+                         valDisplay.innerText = (e.target.value/1000) + 's';
+                         vscode.postMessage({ command: 'setFrequency', value: e.target.value });
+                    });
+                }
+                
+                window.addEventListener('message', e => {
+                    const msg = e.data;
+                    if (msg.command === 'updateStats') {
+                        document.getElementById('clickCount').innerText = msg.stats.clicks;
+                        document.getElementById('sessionCount').innerText = msg.stats.sessions;
+                        if (slider && !${!isPro}) { // Only update slider if Pro (enabled)
+                            slider.value = msg.frequency;
+                            valDisplay.innerText = (msg.frequency/1000) + 's';
+                        }
+                        if (${!isPro}) {
+                            valDisplay.innerText = '0.3s (Fixed)';
+                        }
+                    }
+                });
+
+                vscode.postMessage({ command: 'getStats' });
+            </script>
+        </body>
+        </html>`;
     }
 
     dispose() {
         SettingsPanel.currentPanel = undefined;
+        if (this.pollTimer) clearInterval(this.pollTimer);
         this.panel.dispose();
         while (this.disposables.length) {
             const d = this.disposables.pop();
             if (d) d.dispose();
         }
+    }
+
+    async checkProStatus(userId) {
+        return new Promise((resolve) => {
+            const https = require('https');
+            https.get(`${LICENSE_API}/verify?userId=${userId}`, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    try {
+                        const json = JSON.parse(data);
+                        resolve(json.isPro === true);
+                    } catch (e) {
+                        resolve(false);
+                    }
+                });
+            }).on('error', () => resolve(false));
+        });
+    }
+
+    startPolling(userId) {
+        // Poll every 5s for 5 minutes
+        let attempts = 0;
+        const maxAttempts = 60;
+
+        if (this.pollTimer) clearInterval(this.pollTimer);
+
+        this.pollTimer = setInterval(async () => {
+            attempts++;
+            if (attempts > maxAttempts) {
+                clearInterval(this.pollTimer);
+                return;
+            }
+
+            const isPro = await this.checkProStatus(userId);
+            if (isPro) {
+                clearInterval(this.pollTimer);
+                await this.context.globalState.update('auto-accept-isPro', true);
+                vscode.window.showInformationMessage('Auto Accept: Pro status verified! Thank you for your support.');
+                this.update(); // Refresh UI
+                vscode.commands.executeCommand('auto-accept.updateFrequency', 1000); 
+            }
+        }, 5000);
     }
 }
 

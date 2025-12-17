@@ -1,6 +1,32 @@
+# Exclude git stuff
 .git
 .gitignore
-.env
-*.vsix
-REMOVED_FEATURES.md
+.vscodeignore
+
+# Exclude Dev/Test stuff
+**/*.map
+test/**
+smoke-test.js
+test_output.txt
+test_result.txt
+debug_node.txt
+errors.md
 features.md
+image.png
+
+# Exclude node_modules (WE ARE BUNDLED NOW!)
+node_modules/**
+!node_modules/ws/**
+
+# Exclude source files (since we use dist/extension.js)
+# You can leave them if you want source maps debugging, but for production:
+main_scripts/**
+settings-panel.js
+extension.js
+
+# IMPORTANT: INCLUDE DIST
+!dist/**
+
+# Keep package.json and README
+.env
+
