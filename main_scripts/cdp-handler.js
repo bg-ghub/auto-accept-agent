@@ -438,7 +438,11 @@ class CDPHandler {
             setTimeout(() => {
                 if (this.pendingMessages.has(id)) {
                     this.pendingMessages.delete(id);
-                    reject(new Error('Timeout'));
+                    // Soft timeout - this is expected when pages are busy/navigating
+                    // Don't throw a stack trace, just silently reject with context
+                    const err = new Error(`CDP timeout (${timeout}ms) for ${method} on page ${pageId}`);
+                    err.isTimeout = true; // Flag for callers to identify timeout errors
+                    reject(err);
                 }
             }, timeout);
         });
@@ -632,8 +636,13 @@ class CDPHandler {
                 }
 
             } catch (e) {
-                this.log(`[Page ${pageId}] ERROR: ${e.message}`);
-                this.log(`[Page ${pageId}] Stack: ${e.stack}`);
+                // Timeouts are expected when pages are busy/navigating - log minimally
+                if (e.isTimeout) {
+                    this.log(`[Page ${pageId}] Timeout (page busy/navigating)`);
+                } else {
+                    this.log(`[Page ${pageId}] ERROR: ${e.message}`);
+                    this.log(`[Page ${pageId}] Stack: ${e.stack}`);
+                }
             }
         }
 
@@ -662,10 +671,27 @@ class CDPHandler {
                 // Ensures visual elements are gone even if script state is broken
                 await this.sendCommand(pageId, 'Runtime.evaluate', {
                     expression: `(function(){
+                        // 1. Antigravity Overlay Removal
                         const overlays = document.querySelectorAll('#__autoAcceptBgOverlay');
                         overlays.forEach(el => el.remove());
                         const s = document.getElementById('__autoAcceptBgStyles');
                         if(s) s.remove();
+
+                        // 2. Cursor Overlay Removal
+                        const cOverlays = document.querySelectorAll('#__cursorBgOverlay');
+                        cOverlays.forEach(el => el.remove());
+                        const cs = document.getElementById('__cursorBgStyles');
+                        if(cs) cs.remove();
+
+                        // 3. Direct State Cleanup (if script accessible)
+                        if (window.__autoAcceptPolling) {
+                            if (typeof window.__autoAcceptPolling.hideCursorBackgroundOverlay === 'function') {
+                                window.__autoAcceptPolling.hideCursorBackgroundOverlay();
+                            }
+                            if (typeof window.__autoAcceptPolling.hideBackgroundOverlay === 'function') {
+                                window.__autoAcceptPolling.hideBackgroundOverlay();
+                            }
+                        }
                     })()`,
                     returnByValue: true
                 });

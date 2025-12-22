@@ -96,7 +96,7 @@ async function activate(context) {
         statusBackgroundItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
         statusBackgroundItem.command = 'auto-accept.toggleBackground';
         statusBackgroundItem.text = '$(globe) Background: OFF';
-        statusBackgroundItem.tooltip = 'Background Mode (Antigravity Pro only)';
+        statusBackgroundItem.tooltip = 'Background Mode (Pro) - Works on all chats';
         context.subscriptions.push(statusBackgroundItem);
         // Don't show by default - only when Auto Accept is ON
 
@@ -283,18 +283,10 @@ async function handleBackgroundToggle(context) {
     log('Background toggle clicked');
 
     // Free tier: Show Pro message
-    // Check if using Cursor (Background Mode is Antigravity-only)
-    if (currentIDE === 'cursor') {
-        vscode.window.showInformationMessage(
-            'Background Mode is not yet available for Cursor. It works with Antigravity only for now.',
-            'OK'
-        );
-        return;
-    }
 
     if (!isPro) {
         vscode.window.showInformationMessage(
-            'Background Mode is a Pro feature for Antigravity users.',
+            'Background Mode is a Pro feature.',
             'Learn More'
         ).then(choice => {
             if (choice === 'Learn More') {
@@ -568,7 +560,7 @@ async function showVersionNotification(context) {
 
     // specific copy for 5.0
     const title = "What's new in Auto Accept 5.0";
-    const body = "New for Antigravity Pro users: Background Mode!\n\nAuto Accept can now work on all your open chats at the same time. You don't need to keep each tab open anymore.\n\nNote: Background Mode is not yet available for Cursor.";
+    const body = "New for Pro users: Background Mode!\n\nAuto Accept can now work on all your open chats at the same time. You don't need to keep each tab open anymore.";
     const btnEnable = "Enable Background Mode";
     const btnGotIt = "Got it";
 

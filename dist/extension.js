@@ -4618,10 +4618,27 @@ if (__scriptErrors.length > 0) {
             });
             await this.sendCommand(pageId, "Runtime.evaluate", {
               expression: `(function(){
+                        // 1. Antigravity Overlay Removal
                         const overlays = document.querySelectorAll('#__autoAcceptBgOverlay');
                         overlays.forEach(el => el.remove());
                         const s = document.getElementById('__autoAcceptBgStyles');
                         if(s) s.remove();
+
+                        // 2. Cursor Overlay Removal
+                        const cOverlays = document.querySelectorAll('#__cursorBgOverlay');
+                        cOverlays.forEach(el => el.remove());
+                        const cs = document.getElementById('__cursorBgStyles');
+                        if(cs) cs.remove();
+
+                        // 3. Direct State Cleanup (if script accessible)
+                        if (window.__autoAcceptPolling) {
+                            if (typeof window.__autoAcceptPolling.hideCursorBackgroundOverlay === 'function') {
+                                window.__autoAcceptPolling.hideCursorBackgroundOverlay();
+                            }
+                            if (typeof window.__autoAcceptPolling.hideBackgroundOverlay === 'function') {
+                                window.__autoAcceptPolling.hideBackgroundOverlay();
+                            }
+                        }
                     })()`,
               returnByValue: true
             });
@@ -5296,7 +5313,7 @@ async function activate(context) {
     statusBackgroundItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
     statusBackgroundItem.command = "auto-accept.toggleBackground";
     statusBackgroundItem.text = "$(globe) Background: OFF";
-    statusBackgroundItem.tooltip = "Background Mode (Antigravity Pro only)";
+    statusBackgroundItem.tooltip = "Background Mode (Pro) - Works on all chats";
     context.subscriptions.push(statusBackgroundItem);
     console.log("Auto Accept: Status bar items created and shown.");
   } catch (sbError) {
@@ -5435,16 +5452,9 @@ async function handleRelaunch() {
 }
 async function handleBackgroundToggle(context) {
   log("Background toggle clicked");
-  if (currentIDE === "cursor") {
-    vscode.window.showInformationMessage(
-      "Background Mode is not yet available for Cursor. It works with Antigravity only for now.",
-      "OK"
-    );
-    return;
-  }
   if (!isPro) {
     vscode.window.showInformationMessage(
-      "Background Mode is a Pro feature for Antigravity users.",
+      "Background Mode is a Pro feature.",
       "Learn More"
     ).then((choice) => {
       if (choice === "Learn More") {
@@ -5632,7 +5642,7 @@ async function showVersionNotification(context) {
   const hasShown = context.globalState.get(VERSION_5_0_KEY, false);
   if (hasShown) return;
   const title = "What's new in Auto Accept 5.0";
-  const body = "New for Antigravity Pro users: Background Mode!\n\nAuto Accept can now work on all your open chats at the same time. You don't need to keep each tab open anymore.\n\nNote: Background Mode is not yet available for Cursor.";
+  const body = "New for Pro users: Background Mode!\n\nAuto Accept can now work on all your open chats at the same time. You don't need to keep each tab open anymore.";
   const btnEnable = "Enable Background Mode";
   const btnGotIt = "Got it";
   await context.globalState.update(VERSION_5_0_KEY, true);

@@ -123,21 +123,36 @@ class Relauncher {
     }
 
     async _readWindowsShortcut(shortcutPath) {
-        try {
-            const psCommand = `
-                $ErrorActionPreference = "Stop"
-                $shell = New-Object -ComObject WScript.Shell
-                $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
-                Write-Output "ARGS:$($shortcut.Arguments)"
-                Write-Output "TARGET:$($shortcut.TargetPath)"
-            `.trim().replace(/\n/g, '; ');
+        const scriptPath = path.join(os.tmpdir(), 'auto_accept_read_shortcut.ps1');
 
-            const result = execSync(`powershell -Command "${psCommand}"`, {
+        try {
+            const psScript = `
+$ErrorActionPreference = "Stop"
+try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
+    Write-Output "ARGS:$($shortcut.Arguments)"
+    Write-Output "TARGET:$($shortcut.TargetPath)"
+} catch {
+    Write-Output "ERROR:$($_.Exception.Message)"
+}
+`;
+            fs.writeFileSync(scriptPath, psScript, 'utf8');
+
+            const result = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
                 encoding: 'utf8',
-                timeout: 5000
+                timeout: 10000
             });
 
-            const lines = result.split('\n').map(l => l.trim());
+            const lines = result.split('\n').map(l => l.trim()).filter(l => l);
+
+            // Check for error
+            const errorLine = lines.find(l => l.startsWith('ERROR:'));
+            if (errorLine) {
+                this.log(`Error reading shortcut: ${errorLine.substring(6)}`);
+                return { args: '', target: '', hasFlag: false };
+            }
+
             const argsLine = lines.find(l => l.startsWith('ARGS:')) || 'ARGS:';
             const targetLine = lines.find(l => l.startsWith('TARGET:')) || 'TARGET:';
 
@@ -150,6 +165,8 @@ class Relauncher {
         } catch (e) {
             this.log(`Error reading shortcut ${shortcutPath}: ${e.message}`);
             return { args: '', target: '', hasFlag: false };
+        } finally {
+            try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
         }
     }
 
@@ -228,31 +245,62 @@ class Relauncher {
     }
 
     async _modifyWindowsShortcut(shortcutPath) {
+        const scriptPath = path.join(os.tmpdir(), 'auto_accept_modify_shortcut.ps1');
+
         try {
-            // Note: We avoid newlines in the command passed to powershell -Command to prevent parsing issues
-            const psCommand = `
-                $ErrorActionPreference = "Stop"
-                $shell = New-Object -ComObject WScript.Shell
-                $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
-                if ($shortcut.Arguments -notlike '*--remote-debugging-port*') {
-                    $shortcut.Arguments = '--remote-debugging-port=9222 ' + $shortcut.Arguments
-                    $shortcut.Save()
-                    Write-Output "MODIFIED"
-                } else {
-                    Write-Output "ALREADY_SET"
-                }
-            `.trim().replace(/\n/g, '; ');
+            // Write PowerShell script to temp file to avoid escaping issues
+            const psScript = `
+$ErrorActionPreference = "Stop"
+try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
+    
+    Write-Output "BEFORE_ARGS:$($shortcut.Arguments)"
+    Write-Output "TARGET:$($shortcut.TargetPath)"
+    
+    if ($shortcut.Arguments -notlike '*--remote-debugging-port*') {
+        $shortcut.Arguments = '--remote-debugging-port=${BASE_CDP_PORT} ' + $shortcut.Arguments
+        $shortcut.Save()
+        Write-Output "AFTER_ARGS:$($shortcut.Arguments)"
+        Write-Output "RESULT:MODIFIED"
+    } else {
+        Write-Output "RESULT:ALREADY_SET"
+    }
+} catch {
+    Write-Output "ERROR:$($_.Exception.Message)"
+}
+`;
 
-            const result = execSync(`powershell -Command "${psCommand}"`, {
+            fs.writeFileSync(scriptPath, psScript, 'utf8');
+            this.log(`DEBUG: Wrote modify script to ${scriptPath}`);
+
+            // Execute the script file
+            const rawResult = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
                 encoding: 'utf8',
-                timeout: 5000
-            }).trim();
+                timeout: 10000
+            });
 
-            if (result.includes('MODIFIED')) {
+            this.log(`DEBUG: Raw PowerShell output: ${JSON.stringify(rawResult)}`);
+
+            const lines = rawResult.split('\n').map(l => l.trim()).filter(l => l);
+            this.log(`DEBUG: Parsed lines: ${JSON.stringify(lines)}`);
+
+            // Check for error
+            const errorLine = lines.find(l => l.startsWith('ERROR:'));
+            if (errorLine) {
+                const errorMsg = errorLine.substring(6);
+                this.log(`PowerShell error: ${errorMsg}`);
+                return { success: false, modified: false, message: errorMsg };
+            }
+
+            const resultLine = lines.find(l => l.startsWith('RESULT:'));
+            const result = resultLine ? resultLine.substring(7) : 'UNKNOWN';
+            this.log(`DEBUG: Result extracted: "${result}"`);
+
+            if (result === 'MODIFIED') {
                 this.log(`Modified shortcut: ${shortcutPath}`);
-                // Verify explicitly by reading it back? Optional but good.
                 return { success: true, modified: true, message: `Modified: ${path.basename(shortcutPath)}` };
-            } else if (result.includes('ALREADY_SET')) {
+            } else if (result === 'ALREADY_SET') {
                 this.log(`Shortcut already has CDP flag`);
                 return { success: true, modified: false, message: 'Already configured' };
             } else {
@@ -261,7 +309,11 @@ class Relauncher {
             }
         } catch (e) {
             this.log(`Error modifying shortcut: ${e.message}`);
+            if (e.stderr) this.log(`STDERR: ${e.stderr}`);
             return { success: false, modified: false, message: e.message };
+        } finally {
+            // Clean up temp file
+            try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
         }
     }
 
@@ -390,32 +442,62 @@ open -a "${appBundle}" --args ${CDP_FLAG} "$@"
 
     async _relaunchWindows(shortcut, workspaceFolders) {
         const folderArgs = workspaceFolders.map(f => `"${f}"`).join(' ');
+        const ideName = this.getIDEName();
 
-        // Create batch file for reliable relaunch via shortcut
-        const batchPath = path.join(os.tmpdir(), 'relaunch_ide.bat');
+        // Get the target EXE from the shortcut to run it directly with CDP flag
+        let targetExe = shortcut.target || '';
+
+        if (!targetExe) {
+            // Try to read target from shortcut if not already available
+            try {
+                const info = await this._readWindowsShortcut(shortcut.path);
+                targetExe = info.target;
+            } catch (e) {
+                this.log(`Could not read target from shortcut: ${e.message}`);
+            }
+        }
+
+        const batchFileName = `relaunch_${ideName.replace(/\s+/g, '_')}_${Date.now()}.bat`;
+        const batchPath = path.join(os.tmpdir(), batchFileName);
+
+        let commandLine = '';
+        if (!targetExe || targetExe.endsWith('.lnk')) {
+            // Fallback: Run the shortcut directly (args might be lost)
+            this.log('Fallback: Could not resolve EXE, using shortcut path');
+            commandLine = `start "" "${shortcut.path}" ${folderArgs}`;
+        } else {
+            // Best path: Run EXE directly with explicit CDP flag
+            const safeTarget = `"${targetExe}"`;
+            commandLine = `start "" ${safeTarget} ${CDP_FLAG} ${folderArgs}`;
+        }
+
         const batchContent = `@echo off
 REM Auto Accept - IDE Relaunch Script
-timeout /t 2 /nobreak >nul
-start "" "${shortcut.path}" ${folderArgs}
+timeout /t 5 /nobreak >nul
+${commandLine}
+del "%~f0" & exit
 `;
 
         try {
             fs.writeFileSync(batchPath, batchContent, 'utf8');
             this.log(`Created relaunch batch: ${batchPath}`);
-            this.log(`Shortcut path: ${shortcut.path}`);
+            this.log(`Command: ${commandLine}`);
 
-            const child = spawn('cmd.exe', ['/c', batchPath], {
+            // CRITICAL: Use explorer.exe to run the batch
+            // Explorer is a system service - children of Explorer are detached from VS Code
+            const child = spawn('explorer.exe', [batchPath], {
                 detached: true,
                 stdio: 'ignore',
                 windowsHide: true
             });
             child.unref();
+            this.log('Explorer asked to run batch. Waiting for quit...');
 
-            // Schedule quit
+            // Schedule quit after batch has been handed off
             setTimeout(() => {
                 this.log('Closing current window...');
                 vscode.commands.executeCommand('workbench.action.quit');
-            }, 1500);
+            }, 1000);
 
             return { success: true };
         } catch (e) {

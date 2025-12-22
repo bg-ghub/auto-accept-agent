@@ -42,12 +42,13 @@
         }
 
         const isAntigravity = titleCheck || panelCheck || classCheck;
-        const isCursor = isCursorTitle && !isAntigravity;
+        // Per user request: If not Antigravity, it must be Cursor
+        const isCursor = !isAntigravity;
 
         const result = {
             isAntigravity,
             isCursor,
-            name: isAntigravity ? 'Antigravity' : (isCursor ? 'Cursor' : 'Unknown'),
+            name: isAntigravity ? 'Antigravity' : 'Cursor',
             _debug: {
                 documentTitle: document.title,
                 titleCheck,
@@ -113,7 +114,13 @@
         { pattern: 'accept all', exact: false },
         { pattern: 'acceptalt', exact: false },
         { pattern: 'run command', exact: false },
-        { pattern: 'run', exact: true },
+        { pattern: 'run', exact: false },
+        { pattern: 'run code', exact: false },
+        { pattern: 'run cell', exact: false },
+        { pattern: 'run all', exact: false },
+        { pattern: 'run selection', exact: false },
+        { pattern: 'run and debug', exact: false },
+        { pattern: 'run test', exact: false },
         { pattern: 'apply', exact: true },
         { pattern: 'execute', exact: true },
         { pattern: 'resume', exact: true },
@@ -141,16 +148,44 @@
     exports.findAcceptButtons = function (doc, backgroundMode = false) {
         if (!doc) return [];
         const buttons = [];
+        const checked = new Set(); // Avoid duplicate checks
 
-        // Try specific class first
+        // 1. Try Antigravity-specific class first
         doc.querySelectorAll('.bg-ide-button-background').forEach(el => {
-            if (exports.isAcceptButton(el, backgroundMode)) buttons.push(el);
+            if (!checked.has(el) && exports.isAcceptButton(el, backgroundMode)) {
+                checked.add(el);
+                buttons.push(el);
+            }
         });
 
-        // Fallback to generic
+        // 2. CURSOR-SPECIFIC: Scope to input box area (proven working approach from v4.x)
+        // Cursor places accept/run buttons as siblings BEFORE the input box
+        const inputBox = doc.querySelector('div.full-input-box');
+        if (inputBox) {
+            let sibling = inputBox.previousElementSibling;
+            let count = 0;
+            while (sibling && count < 5) {
+                const selectors = ['div[class*="button"]', 'button', '[class*="anysphere"]'];
+                selectors.forEach(s => {
+                    sibling.querySelectorAll(s).forEach(el => {
+                        if (!checked.has(el) && exports.isAcceptButton(el, backgroundMode)) {
+                            checked.add(el);
+                            buttons.push(el);
+                        }
+                    });
+                });
+                sibling = sibling.previousElementSibling;
+                count++;
+            }
+        }
+
+        // 3. Fallback to generic button selectors (global search)
         if (buttons.length === 0) {
-            doc.querySelectorAll('button, [role="button"], div[class*="button"]').forEach(el => {
-                if (exports.isAcceptButton(el, backgroundMode)) buttons.push(el);
+            doc.querySelectorAll('button, [role="button"], div[class*="button"], [class*="anysphere"]').forEach(el => {
+                if (!checked.has(el) && exports.isAcceptButton(el, backgroundMode)) {
+                    checked.add(el);
+                    buttons.push(el);
+                }
             });
         }
 

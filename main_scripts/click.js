@@ -72,7 +72,7 @@ function isAcceptButton(el) {
     // Only text check mostly, but we do filtering below
     if (!el || !el.textContent) return false;
     const text = el.textContent.toLowerCase().trim();
-    if (text.length === 0 || text.length > 30) return false;
+    if (text.length === 0 || text.length > 50) return false;
 
     // --- PATTERN MATCHING ---
     const patterns = [
@@ -81,7 +81,13 @@ function isAcceptButton(el) {
         // We use .includes for "acceptalt" because the arrow symbol might vary or be stripped
         { pattern: 'acceptalt', enabled: config.enableAccept, exact: false },
         { pattern: 'run command', enabled: config.enableRunCommand, exact: false },
-        { pattern: 'run', enabled: config.enableRun, exact: true },
+        { pattern: 'run', enabled: config.enableRun, exact: false },
+        { pattern: 'run code', enabled: config.enableRun, exact: false },
+        { pattern: 'run cell', enabled: config.enableRun, exact: false },
+        { pattern: 'run all', enabled: config.enableRun, exact: false },
+        { pattern: 'run selection', enabled: config.enableRun, exact: false },
+        { pattern: 'run and debug', enabled: config.enableRun, exact: false },
+        { pattern: 'run test', enabled: config.enableRun, exact: false },
         { pattern: 'apply', enabled: config.enableApply, exact: true },
         { pattern: 'execute', enabled: config.enableExecute, exact: true },
         { pattern: 'resume', enabled: config.enableResume, exact: true },
@@ -125,24 +131,44 @@ function findAcceptButtons() {
     const root = getAntigravityDoc();
     if (!root) return [];
 
-    // 1. Precise "Accept" / "Run" Button
-    // Verified Selector: Button with specific class signature found in discovery
-    // Class: "hover:bg-ide-button-hover-background cursor-pointer rounded-sm bg-ide-button-background px-1 py-px text-sm text-ide-button-color transition-[background]"
-    // Strategy: Look for "bg-ide-button-background" (very specific) OR text content "accept"
+    const checked = new Set();
 
-    // Primary: CSS Class Match
-    const classCandidates = root.querySelectorAll('.bg-ide-button-background');
-    classCandidates.forEach(el => {
-        if (isAcceptButton(el)) buttons.push(el);
+    // 1. Antigravity-specific class
+    root.querySelectorAll('.bg-ide-button-background').forEach(el => {
+        if (!checked.has(el) && isAcceptButton(el)) {
+            checked.add(el);
+            buttons.push(el);
+        }
     });
 
-    // Secondary: Deep Text Scan (for fallback)
-    // Only if Primary yields nothing
+    // 2. CURSOR-SPECIFIC: Scope to input box area (proven working approach from v4.x)
+    // Cursor places accept/run buttons as siblings BEFORE the input box
+    const inputBox = root.querySelector('div.full-input-box');
+    if (inputBox) {
+        let sibling = inputBox.previousElementSibling;
+        let count = 0;
+        while (sibling && count < 5) {
+            const selectors = ['div[class*="button"]', 'button', '[class*="anysphere"]'];
+            selectors.forEach(s => {
+                sibling.querySelectorAll(s).forEach(el => {
+                    if (!checked.has(el) && isAcceptButton(el)) {
+                        checked.add(el);
+                        buttons.push(el);
+                    }
+                });
+            });
+            sibling = sibling.previousElementSibling;
+            count++;
+        }
+    }
+
+    // 3. Fallback to generic selectors (global search)
     if (buttons.length === 0) {
-        // Broad search for button-like elements
-        const candidates = root.querySelectorAll('button, [role="button"], div[class*="button"]');
-        candidates.forEach(el => {
-            if (isAcceptButton(el)) buttons.push(el);
+        root.querySelectorAll('button, [role="button"], div[class*="button"], [class*="anysphere"]').forEach(el => {
+            if (!checked.has(el) && isAcceptButton(el)) {
+                checked.add(el);
+                buttons.push(el);
+            }
         });
     }
 
