@@ -96,7 +96,7 @@ async function activate(context) {
         statusBackgroundItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98);
         statusBackgroundItem.command = 'auto-accept.toggleBackground';
         statusBackgroundItem.text = '$(globe) Background: OFF';
-        statusBackgroundItem.tooltip = 'Background Auto-Accept (Pro)';
+        statusBackgroundItem.tooltip = 'Background Mode (Antigravity Pro only)';
         context.subscriptions.push(statusBackgroundItem);
         // Don't show by default - only when Auto Accept is ON
 
@@ -283,9 +283,18 @@ async function handleBackgroundToggle(context) {
     log('Background toggle clicked');
 
     // Free tier: Show Pro message
+    // Check if using Cursor (Background Mode is Antigravity-only)
+    if (currentIDE === 'cursor') {
+        vscode.window.showInformationMessage(
+            'Background Mode only works with Antigravity. It is not available for Cursor.',
+            'OK'
+        );
+        return;
+    }
+
     if (!isPro) {
         vscode.window.showInformationMessage(
-            'Background Auto-Accept is a Pro feature.',
+            'Background Mode is a Pro feature for Antigravity users.',
             'Learn More'
         ).then(choice => {
             if (choice === 'Learn More') {
@@ -302,10 +311,10 @@ async function handleBackgroundToggle(context) {
     if (!dontShowAgain && !backgroundModeEnabled) {
         // First-time enabling: Show confirmation dialog
         const choice = await vscode.window.showInformationMessage(
-            'Enable Background Auto-Accept?\n\n' +
-            'This allows Auto Accept Agent to temporarily switch between conversation tabs ' +
-            'to accept pending actions in the background.\n\n' +
-            'You may see brief focus changes while it runs.',
+            'Turn on Background Mode?\n\n' +
+            'This lets Auto Accept work on all your open chats at once. ' +
+            'It will switch between tabs to click Accept for you.\n\n' +
+            'You might see tabs change quickly while it works.',
             { modal: true },
             'Enable',
             "Don't Show Again & Enable",
@@ -448,24 +457,24 @@ function updateStatusBar() {
 
     if (isEnabled) {
         let statusText = 'ON';
-        let tooltip = `Auto Accept is running (${currentIDE} mode).`;
+        let tooltip = `Auto Accept is running.`;
         let bgColor = undefined;
 
         // State-based status (both IDEs now use CDP state machine)
         if (agentState === 'running') {
             statusText = 'ON';
-            if (cdpHandler && cdpHandler.getConnectionCount() > 0) statusText += ' (CDP)';
+            if (cdpHandler && cdpHandler.getConnectionCount() > 0) statusText += ' ✓';
         } else if (agentState === 'stalled') {
             statusText = 'WAITING';
-            tooltip = isPro ? 'Agent stalled. Max retries reached.' : 'Agent waiting — built-in rules failed';
+            tooltip = isPro ? 'Waiting. Nothing to click right now.' : 'Waiting. Nothing to click right now.';
             bgColor = new vscode.ThemeColor('statusBarItem.warningBackground');
         } else if (agentState === 'recovering') {
-            statusText = 'RECOVERING...';
-            tooltip = `Attempting recovery (${retryCount}/${MAX_RETRIES})`;
+            statusText = 'TRYING...';
+            tooltip = `Trying again (${retryCount}/${MAX_RETRIES})`;
             bgColor = new vscode.ThemeColor('statusBarItem.warningBackground');
         } else if (agentState === 'recovered') {
-            statusText = `RECOVERED (${retryCount})`;
-            tooltip = `Auto-recovered after ${retryCount} retries.`;
+            statusText = `FIXED (${retryCount})`;
+            tooltip = `Fixed after ${retryCount} tries.`;
             bgColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         }
 
@@ -482,11 +491,11 @@ function updateStatusBar() {
         if (statusBackgroundItem) {
             if (backgroundModeEnabled) {
                 statusBackgroundItem.text = '$(sync~spin) Background: ON';
-                statusBackgroundItem.tooltip = 'Background Auto-Accept is active. Click to disable.';
+                statusBackgroundItem.tooltip = 'Background Mode is on. Click to turn off.';
                 statusBackgroundItem.backgroundColor = undefined;
             } else {
                 statusBackgroundItem.text = '$(globe) Background: OFF';
-                statusBackgroundItem.tooltip = 'Click to enable Background Auto-Accept (cycles through conversation tabs).';
+                statusBackgroundItem.tooltip = 'Click to turn on Background Mode (works on all your chats).';
                 statusBackgroundItem.backgroundColor = undefined;
             }
             statusBackgroundItem.show();
@@ -556,8 +565,8 @@ async function showVersionNotification(context) {
     if (hasShown) return;
 
     // specific copy for 5.0
-    const title = "What’s new in Auto Accept Agent 5.0";
-    const body = "Auto Accept can now accept agent actions in background conversations, so you don’t have to keep each tab open.\n\nPro users can enable Background Auto-Accept to keep multiple agents moving while they focus elsewhere.";
+    const title = "What's new in Auto Accept 5.0";
+    const body = "New for Antigravity Pro users: Background Mode!\n\nAuto Accept can now work on all your open chats at the same time. You don't need to keep each tab open anymore.\n\nNote: Background Mode only works with Antigravity, not Cursor.";
     const btnEnable = "Enable Background Mode";
     const btnGotIt = "Got it";
 
