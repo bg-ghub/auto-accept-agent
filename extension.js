@@ -286,7 +286,7 @@ async function handleBackgroundToggle(context) {
     // Check if using Cursor (Background Mode is Antigravity-only)
     if (currentIDE === 'cursor') {
         vscode.window.showInformationMessage(
-            'Background Mode only works with Antigravity. It is not available for Cursor.',
+            'Background Mode is not yet available for Cursor. It works with Antigravity only for now.',
             'OK'
         );
         return;
@@ -566,7 +566,7 @@ async function showVersionNotification(context) {
 
     // specific copy for 5.0
     const title = "What's new in Auto Accept 5.0";
-    const body = "New for Antigravity Pro users: Background Mode!\n\nAuto Accept can now work on all your open chats at the same time. You don't need to keep each tab open anymore.\n\nNote: Background Mode only works with Antigravity, not Cursor.";
+    const body = "New for Antigravity Pro users: Background Mode!\n\nAuto Accept can now work on all your open chats at the same time. You don't need to keep each tab open anymore.\n\nNote: Background Mode is not yet available for Cursor.";
     const btnEnable = "Enable Background Mode";
     const btnGotIt = "Got it";
 
