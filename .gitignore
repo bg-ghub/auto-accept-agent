@@ -1,3 +1,24 @@
-* 
-!media
-!releases
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+*.vsix
+
+# Proprietary source logic
+main_scripts/
+extension.js
+settings-panel.js
+config.js
+test_scripts/
+
+# Environment and secrets
+.env
+.env.*
+
+# Logs and temp files
+*.log
+list.txt
+
+# IDE settings
+.vscode/

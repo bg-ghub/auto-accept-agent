@@ -9,9 +9,17 @@
 .vscode
 .env
 *.md
-!readme.md
+!README.md
 !TODO.md
 !LICENSE.md
+
+# IMPORTANT: Include these in the VSIX even if git-ignored
+!dist/extension.js
+!media/*.png
+!media/*.jpg
+!media/icon.png
+!main_scripts/
+
 
 # Test files  
 test/
