@@ -20,7 +20,7 @@ var require_settings_panel = __commonJS({
   "settings-panel.js"(exports2, module2) {
     var vscode2 = require("vscode");
     var { STRIPE_LINKS } = require_config();
-    var LICENSE_API = "https://auto-accept-backend.onrender.com/api";
+    var LICENSE_API2 = "https://auto-accept-backend.onrender.com/api";
     var SettingsPanel2 = class _SettingsPanel {
       static currentPanel = void 0;
       static viewType = "autoAcceptSettings";
@@ -653,7 +653,7 @@ var require_settings_panel = __commonJS({
       async checkProStatus(userId) {
         return new Promise((resolve) => {
           const https = require("https");
-          https.get(`${LICENSE_API}/verify?userId=${userId}`, (res) => {
+          https.get(`${LICENSE_API2}/verify?userId=${userId}`, (res) => {
             let data = "";
             res.on("data", (chunk) => data += chunk);
             res.on("end", () => {
@@ -4633,6 +4633,7 @@ var require_relauncher = __commonJS({
     var BASE_CDP_PORT = 9e3;
     var ALTERNATE_CDP_PORT = 9222;
     var CDP_FLAG = `--remote-debugging-port=${BASE_CDP_PORT}`;
+    var CDP_ADDITIONAL_FLAGS = "--disable-gpu-driver-bug-workarounds --ignore-gpu-blacklist";
     var Relauncher = class {
       constructor(logger = null) {
         this.platform = os.platform();
@@ -4647,6 +4648,10 @@ var require_relauncher = __commonJS({
             this.logger(formattedMsg);
           }
           console.log(formattedMsg);
+          try {
+            fs.appendFileSync(this.logFile, formattedMsg + "\n");
+          } catch (e) {
+          }
         } catch (e) {
           console.error("Relauncher log error:", e);
         }
@@ -4676,7 +4681,6 @@ var require_relauncher = __commonJS({
         return false;
       }
       // find shortcut for this ide
-      // handles windows mac and linux
       getIDEName() {
         const appName = vscode2.env.appName || "";
         if (appName.toLowerCase().includes("cursor")) return "Cursor";
@@ -4687,61 +4691,316 @@ var require_relauncher = __commonJS({
         const ideName = this.getIDEName();
         this.log(`Finding shortcuts for: ${ideName}`);
         if (this.platform === "win32") {
-          return await this._findWindowsShortcuts(ideName);
+          return await this._findWindowsShortcutsDynamic(ideName);
         } else if (this.platform === "darwin") {
           return await this._findMacOSShortcuts(ideName);
         } else {
           return await this._findLinuxShortcuts(ideName);
         }
       }
-      async _findWindowsShortcuts(ideName) {
+      /**
+       * IMPROVED: Dynamic Windows shortcut search using PowerShell
+       * This searches the Desktop recursively and uses fuzzy matching
+       */
+      async _findWindowsShortcutsDynamic(ideName) {
         const shortcuts = [];
-        const searchDirs = [
-          path2.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs"),
-          path2.join(process.env.USERPROFILE || "", "Desktop"),
-          path2.join(process.env.APPDATA || "", "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar")
-        ];
-        const nameVariants = [ideName];
-        if (ideName === "Code") nameVariants.push("Visual Studio Code");
-        if (ideName === "Antigravity") nameVariants.push("Antigravity CDP");
-        for (const dir of searchDirs) {
-          if (!fs.existsSync(dir)) continue;
-          try {
-            const files = fs.readdirSync(dir);
-            for (const file of files) {
-              if (file.endsWith(".lnk")) {
-                const lowerFile = file.toLowerCase();
-                const isMatch = nameVariants.some((v) => lowerFile.includes(v.toLowerCase()));
-                if (isMatch) {
-                  const shortcutPath = path2.join(dir, file);
-                  const info = await this._readWindowsShortcut(shortcutPath);
-                  shortcuts.push({
-                    path: shortcutPath,
-                    hasFlag: info.hasFlag,
-                    type: dir.includes("Start Menu") ? "startmenu" : dir.includes("Desktop") ? "desktop" : "taskbar",
-                    args: info.args,
-                    target: info.target
-                  });
-                }
-              }
+        const scriptPath = path2.join(os.tmpdir(), "auto_accept_find_shortcuts.ps1");
+        try {
+          const psScript = `
+$ErrorActionPreference = "SilentlyContinue"
+$WshShell = New-Object -ComObject WScript.Shell
+$DesktopPath = [System.IO.Path]::Combine($env:USERPROFILE, "Desktop")
+$StartMenuPath = [System.IO.Path]::Combine($env:APPDATA, "Microsoft", "Windows", "Start Menu", "Programs")
+$TaskBarPath = [System.IO.Path]::Combine($env:APPDATA, "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar")
+
+$AllShortcuts = @()
+
+# Search Desktop (no recursion)
+if (Test-Path $DesktopPath) {
+    $AllShortcuts += Get-ChildItem "$DesktopPath\\*.lnk" -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*${ideName}*" }
+}
+
+# Search Start Menu (with recursion for subfolders)
+if (Test-Path $StartMenuPath) {
+    $AllShortcuts += Get-ChildItem "$StartMenuPath\\*.lnk" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*${ideName}*" }
+}
+
+# Search TaskBar
+if (Test-Path $TaskBarPath) {
+    $AllShortcuts += Get-ChildItem "$TaskBarPath\\*.lnk" -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*${ideName}*" }
+}
+
+if ($AllShortcuts.Count -eq 0) {
+    Write-Output "NONE_FOUND"
+} else {
+    foreach ($ShortcutFile in $AllShortcuts) {
+        try {
+            $Shortcut = $WshShell.CreateShortcut($ShortcutFile.FullName)
+            $ShortcutType = "unknown"
+            if ($ShortcutFile.FullName -like "*Desktop*") { $ShortcutType = "desktop" }
+            elseif ($ShortcutFile.FullName -like "*Start Menu*") { $ShortcutType = "startmenu" }
+            elseif ($ShortcutFile.FullName -like "*TaskBar*") { $ShortcutType = "taskbar" }
+            
+            # Output in parseable format
+            Write-Output "SHORTCUT_START"
+            Write-Output "PATH:$($ShortcutFile.FullName)"
+            Write-Output "TARGET:$($Shortcut.TargetPath)"
+            Write-Output "ARGS:$($Shortcut.Arguments)"
+            Write-Output "TYPE:$ShortcutType"
+            Write-Output "SHORTCUT_END"
+        } catch {
+            # Skip this shortcut if we can't read it
+        }
+    }
+}
+`;
+          fs.writeFileSync(scriptPath, psScript, "utf8");
+          this.log(`DEBUG: Created find shortcuts script at ${scriptPath}`);
+          const result = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+            encoding: "utf8",
+            timeout: 3e4
+          });
+          this.log(`DEBUG: PowerShell output:
+${result}`);
+          if (result.includes("NONE_FOUND")) {
+            this.log("No shortcuts found by PowerShell search");
+            return [];
+          }
+          const shortcutBlocks = result.split("SHORTCUT_START").filter((b) => b.includes("SHORTCUT_END"));
+          for (const block of shortcutBlocks) {
+            const lines = block.split("\n").map((l) => l.trim()).filter((l) => l);
+            const pathLine = lines.find((l) => l.startsWith("PATH:"));
+            const targetLine = lines.find((l) => l.startsWith("TARGET:"));
+            const argsLine = lines.find((l) => l.startsWith("ARGS:"));
+            const typeLine = lines.find((l) => l.startsWith("TYPE:"));
+            if (pathLine) {
+              const shortcutPath = pathLine.substring(5);
+              const target = targetLine ? targetLine.substring(7) : "";
+              const args = argsLine ? argsLine.substring(5) : "";
+              const type = typeLine ? typeLine.substring(5) : "unknown";
+              const hasFlag = args.includes("--remote-debugging-port");
+              shortcuts.push({
+                path: shortcutPath,
+                target,
+                args,
+                type,
+                hasFlag
+              });
+              this.log(`Found shortcut: ${shortcutPath} (type: ${type}, hasFlag: ${hasFlag})`);
             }
+          }
+          this.log(`Found ${shortcuts.length} Windows shortcuts total`);
+          return shortcuts;
+        } catch (e) {
+          this.log(`Error finding shortcuts: ${e.message}`);
+          return [];
+        } finally {
+          try {
+            fs.unlinkSync(scriptPath);
           } catch (e) {
-            this.log(`Error searching directory ${dir}: ${e.message}`);
           }
         }
-        this.log(`Found ${shortcuts.length} Windows shortcuts`);
-        return shortcuts;
       }
+      /**
+       * Find the IDE executable dynamically on Windows
+       */
+      async _findWindowsExecutable(ideName) {
+        const scriptPath = path2.join(os.tmpdir(), "auto_accept_find_exe.ps1");
+        try {
+          const psScript = `
+$ErrorActionPreference = "SilentlyContinue"
+$IdeName = "${ideName}"
+
+# Common installation paths for Electron-based IDEs
+$Paths = @(
+    "$env:LOCALAPPDATA\\Programs\\$IdeName\\$IdeName.exe",
+    "$env:LOCALAPPDATA\\$IdeName\\$IdeName.exe",
+    "$env:ProgramFiles\\$IdeName\\$IdeName.exe",
+    "\${env:ProgramFiles(x86)}\\$IdeName\\$IdeName.exe"
+)
+
+# Add VS Code specific paths
+if ($IdeName -eq "Code") {
+    $Paths += "$env:LOCALAPPDATA\\Programs\\Microsoft VS Code\\Code.exe"
+    $Paths += "$env:ProgramFiles\\Microsoft VS Code\\Code.exe"
+}
+
+foreach ($ExePath in $Paths) {
+    if (Test-Path $ExePath) {
+        Write-Output "FOUND:$ExePath"
+        exit
+    }
+}
+
+Write-Output "NOT_FOUND"
+`;
+          fs.writeFileSync(scriptPath, psScript, "utf8");
+          const result = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+            encoding: "utf8",
+            timeout: 1e4
+          }).trim();
+          if (result.startsWith("FOUND:")) {
+            const exePath = result.substring(6);
+            this.log(`Found executable: ${exePath}`);
+            return exePath;
+          }
+          this.log("Executable not found in common locations");
+          return null;
+        } catch (e) {
+          this.log(`Error finding executable: ${e.message}`);
+          return null;
+        } finally {
+          try {
+            fs.unlinkSync(scriptPath);
+          } catch (e) {
+          }
+        }
+      }
+      /**
+       * Create a new Windows shortcut with CDP flag if none exist
+       */
+      async _createWindowsShortcut(ideName, targetExe) {
+        const desktopPath = path2.join(process.env.USERPROFILE || "", "Desktop");
+        const shortcutPath = path2.join(desktopPath, `${ideName}.lnk`);
+        const scriptPath = path2.join(os.tmpdir(), "auto_accept_create_shortcut.ps1");
+        try {
+          const psScript = `
+$ErrorActionPreference = "Stop"
+try {
+    $WshShell = New-Object -ComObject WScript.Shell
+    $Shortcut = $WshShell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
+    $Shortcut.TargetPath = '${targetExe.replace(/'/g, "''")}'
+    $Shortcut.Arguments = '${CDP_FLAG} ${CDP_ADDITIONAL_FLAGS}'
+    $Shortcut.WorkingDirectory = '${path2.dirname(targetExe).replace(/'/g, "''")}'
+    $Shortcut.Description = '${ideName} with CDP debugging enabled'
+    $Shortcut.Save()
+    Write-Output "SUCCESS:$('${shortcutPath.replace(/'/g, "''")}')"
+} catch {
+    Write-Output "ERROR:$($_.Exception.Message)"
+}
+`;
+          fs.writeFileSync(scriptPath, psScript, "utf8");
+          const result = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+            encoding: "utf8",
+            timeout: 1e4
+          }).trim();
+          if (result.startsWith("SUCCESS:")) {
+            this.log(`Created shortcut: ${shortcutPath}`);
+            return {
+              success: true,
+              path: shortcutPath,
+              target: targetExe
+            };
+          } else if (result.startsWith("ERROR:")) {
+            const error = result.substring(6);
+            this.log(`Failed to create shortcut: ${error}`);
+            return { success: false, message: error };
+          }
+          return { success: false, message: "Unexpected result" };
+        } catch (e) {
+          this.log(`Error creating shortcut: ${e.message}`);
+          return { success: false, message: e.message };
+        } finally {
+          try {
+            fs.unlinkSync(scriptPath);
+          } catch (e) {
+          }
+        }
+      }
+      /**
+       * Modify a Windows shortcut to add/update CDP port
+       */
+      async _modifyWindowsShortcut(shortcutPath) {
+        const scriptPath = path2.join(os.tmpdir(), "auto_accept_modify_shortcut.ps1");
+        try {
+          const psScript = `
+$ErrorActionPreference = "Stop"
+try {
+    $WshShell = New-Object -ComObject WScript.Shell
+    $Shortcut = $WshShell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
+    
+    Write-Output "BEFORE_ARGS:$($Shortcut.Arguments)"
+    Write-Output "TARGET:$($Shortcut.TargetPath)"
+    
+    $CurrentArgs = $Shortcut.Arguments
+    $NewPort = '${BASE_CDP_PORT}'
+    $PortPattern = '--remote-debugging-port=\\d+'
+    
+    if ($CurrentArgs -match $PortPattern) {
+        # Replace existing port
+        $NewArgs = $CurrentArgs -replace $PortPattern, "--remote-debugging-port=$NewPort"
+        if ($NewArgs -ne $CurrentArgs) {
+            $Shortcut.Arguments = $NewArgs
+            $Shortcut.Save()
+            Write-Output "AFTER_ARGS:$($Shortcut.Arguments)"
+            Write-Output "RESULT:UPDATED"
+        } else {
+            Write-Output "RESULT:ALREADY_CORRECT"
+        }
+    } else {
+        # No port flag, add it at the beginning
+        $Shortcut.Arguments = "--remote-debugging-port=$NewPort " + $CurrentArgs
+        $Shortcut.Save()
+        Write-Output "AFTER_ARGS:$($Shortcut.Arguments)"
+        Write-Output "RESULT:MODIFIED"
+    }
+} catch {
+    Write-Output "ERROR:$($_.Exception.Message)"
+}
+`;
+          fs.writeFileSync(scriptPath, psScript, "utf8");
+          this.log(`DEBUG: Created modify script at ${scriptPath}`);
+          const rawResult = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+            encoding: "utf8",
+            timeout: 1e4
+          });
+          this.log(`DEBUG: Modify output:
+${rawResult}`);
+          const lines = rawResult.split("\n").map((l) => l.trim()).filter((l) => l);
+          const errorLine = lines.find((l) => l.startsWith("ERROR:"));
+          if (errorLine) {
+            const errorMsg = errorLine.substring(6);
+            this.log(`PowerShell error: ${errorMsg}`);
+            return { success: false, modified: false, message: errorMsg };
+          }
+          const resultLine = lines.find((l) => l.startsWith("RESULT:"));
+          const result = resultLine ? resultLine.substring(7) : "UNKNOWN";
+          if (result === "MODIFIED") {
+            this.log(`Modified shortcut: ${shortcutPath}`);
+            return { success: true, modified: true, message: `Modified: ${path2.basename(shortcutPath)}` };
+          } else if (result === "UPDATED") {
+            this.log(`Updated shortcut port: ${shortcutPath}`);
+            return { success: true, modified: true, message: `Updated port: ${path2.basename(shortcutPath)}` };
+          } else if (result === "ALREADY_CORRECT") {
+            this.log(`Shortcut already has correct CDP port`);
+            return { success: true, modified: false, message: "Already configured with correct port" };
+          } else {
+            this.log(`Unexpected result: ${result}`);
+            return { success: false, modified: false, message: `Unexpected result: ${result}` };
+          }
+        } catch (e) {
+          this.log(`Error modifying shortcut: ${e.message}`);
+          return { success: false, modified: false, message: e.message };
+        } finally {
+          try {
+            fs.unlinkSync(scriptPath);
+          } catch (e) {
+          }
+        }
+      }
+      /**
+       * Read Windows shortcut properties
+       */
       async _readWindowsShortcut(shortcutPath) {
         const scriptPath = path2.join(os.tmpdir(), "auto_accept_read_shortcut.ps1");
         try {
           const psScript = `
 $ErrorActionPreference = "Stop"
 try {
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
-    Write-Output "ARGS:$($shortcut.Arguments)"
-    Write-Output "TARGET:$($shortcut.TargetPath)"
+    $WshShell = New-Object -ComObject WScript.Shell
+    $Shortcut = $WshShell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
+    Write-Output "ARGS:$($Shortcut.Arguments)"
+    Write-Output "TARGET:$($Shortcut.TargetPath)"
 } catch {
     Write-Output "ERROR:$($_.Exception.Message)"
 }
@@ -4762,7 +5021,6 @@ try {
           const args = argsLine.substring(5);
           const target = targetLine.substring(7);
           const hasFlag = args.includes("--remote-debugging-port");
-          this.log(`Read shortcut: args="${args}", hasFlag=${hasFlag}`);
           return { args, target, hasFlag };
         } catch (e) {
           this.log(`Error reading shortcut ${shortcutPath}: ${e.message}`);
@@ -4774,6 +5032,7 @@ try {
           }
         }
       }
+      // macOS shortcut handling
       async _findMacOSShortcuts(ideName) {
         const shortcuts = [];
         const wrapperPath = path2.join(os.homedir(), ".local", "bin", `${ideName.toLowerCase()}-cdp`);
@@ -4790,13 +5049,38 @@ try {
           shortcuts.push({
             path: appPath,
             hasFlag: false,
-            // .app bundles don't have modifiable args
             type: "app"
           });
         }
         this.log(`Found ${shortcuts.length} macOS shortcuts/apps`);
         return shortcuts;
       }
+      async _createMacOSWrapper() {
+        const ideName = this.getIDEName();
+        const wrapperDir = path2.join(os.homedir(), ".local", "bin");
+        const wrapperPath = path2.join(wrapperDir, `${ideName.toLowerCase()}-cdp`);
+        try {
+          fs.mkdirSync(wrapperDir, { recursive: true });
+          const appBundle = `/Applications/${ideName}.app`;
+          const scriptContent = `#!/bin/bash
+# Auto Accept - ${ideName} with CDP enabled
+# Generated: ${(/* @__PURE__ */ new Date()).toISOString()}
+open -a "${appBundle}" --args ${CDP_FLAG} "$@"
+`;
+          fs.writeFileSync(wrapperPath, scriptContent, { mode: 493 });
+          this.log(`Created macOS wrapper: ${wrapperPath}`);
+          return {
+            success: true,
+            modified: true,
+            message: `Created wrapper script. Launch via: ${wrapperPath}`,
+            wrapperPath
+          };
+        } catch (e) {
+          this.log(`Error creating macOS wrapper: ${e.message}`);
+          return { success: false, modified: false, message: e.message };
+        }
+      }
+      // Linux shortcut handling
       async _findLinuxShortcuts(ideName) {
         const shortcuts = [];
         const desktopLocations = [
@@ -4818,223 +5102,6 @@ try {
         }
         this.log(`Found ${shortcuts.length} Linux .desktop files`);
         return shortcuts;
-      }
-      // add flag to shortcut if absent
-      async ensureShortcutHasFlag(shortcut) {
-        if (shortcut.hasFlag) {
-          return { success: true, modified: false, message: "Already has CDP flag" };
-        }
-        if (this.platform === "win32") {
-          return await this._modifyWindowsShortcut(shortcut.path);
-        } else if (this.platform === "darwin") {
-          return await this._createMacOSWrapper();
-        } else {
-          return await this._modifyLinuxDesktop(shortcut.path);
-        }
-      }
-      async _modifyWindowsShortcut(shortcutPath) {
-        const scriptPath = path2.join(os.tmpdir(), "auto_accept_modify_shortcut.ps1");
-        try {
-          const psScript = `
-$ErrorActionPreference = "Stop"
-try {
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
-    
-    Write-Output "BEFORE_ARGS:$($shortcut.Arguments)"
-    Write-Output "TARGET:$($shortcut.TargetPath)"
-    
-    $currentArgs = $shortcut.Arguments
-    $newPort = '${BASE_CDP_PORT}'
-    $portPattern = '--remote-debugging-port=\\d+'
-    
-    if ($currentArgs -match $portPattern) {
-        # Replace existing port with new port
-        $shortcut.Arguments = $currentArgs -replace $portPattern, "--remote-debugging-port=$newPort"
-        if ($shortcut.Arguments -ne $currentArgs) {
-            $shortcut.Save()
-            Write-Output "AFTER_ARGS:$($shortcut.Arguments)"
-            Write-Output "RESULT:UPDATED"
-        } else {
-            Write-Output "RESULT:ALREADY_CORRECT"
-        }
-    } else {
-        # No port flag, add it
-        $shortcut.Arguments = "--remote-debugging-port=$newPort " + $currentArgs
-        $shortcut.Save()
-        Write-Output "AFTER_ARGS:$($shortcut.Arguments)"
-        Write-Output "RESULT:MODIFIED"
-    }
-} catch {
-    Write-Output "ERROR:$($_.Exception.Message)"
-}
-`;
-          fs.writeFileSync(scriptPath, psScript, "utf8");
-          this.log(`DEBUG: Wrote modify script to ${scriptPath}`);
-          const rawResult = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
-            encoding: "utf8",
-            timeout: 1e4
-          });
-          this.log(`DEBUG: Raw PowerShell output: ${JSON.stringify(rawResult)}`);
-          const lines = rawResult.split("\n").map((l) => l.trim()).filter((l) => l);
-          this.log(`DEBUG: Parsed lines: ${JSON.stringify(lines)}`);
-          const errorLine = lines.find((l) => l.startsWith("ERROR:"));
-          if (errorLine) {
-            const errorMsg = errorLine.substring(6);
-            this.log(`PowerShell error: ${errorMsg}`);
-            return { success: false, modified: false, message: errorMsg };
-          }
-          const resultLine = lines.find((l) => l.startsWith("RESULT:"));
-          const result = resultLine ? resultLine.substring(7) : "UNKNOWN";
-          this.log(`DEBUG: Result extracted: "${result}"`);
-          if (result === "MODIFIED") {
-            this.log(`Modified shortcut: ${shortcutPath}`);
-            return { success: true, modified: true, message: `Modified: ${path2.basename(shortcutPath)}` };
-          } else if (result === "UPDATED") {
-            this.log(`Updated shortcut port: ${shortcutPath}`);
-            return { success: true, modified: true, message: `Updated port: ${path2.basename(shortcutPath)}` };
-          } else if (result === "ALREADY_CORRECT") {
-            this.log(`Shortcut already has correct CDP port`);
-            return { success: true, modified: false, message: "Already configured with correct port" };
-          } else {
-            this.log(`Unexpected result: ${result}`);
-            return { success: false, modified: false, message: `Unexpected result: ${result}` };
-          }
-        } catch (e) {
-          this.log(`Error modifying shortcut: ${e.message}`);
-          if (e.stderr) this.log(`STDERR: ${e.stderr}`);
-          return { success: false, modified: false, message: e.message };
-        } finally {
-          try {
-            fs.unlinkSync(scriptPath);
-          } catch (e) {
-          }
-        }
-      }
-      // Auto-create a Windows shortcut when none exist
-      async _autoCreateWindowsShortcut() {
-        const ideName = this.getIDEName();
-        this.log(`Attempting to auto-create shortcut for: ${ideName}`);
-        const possibleExePaths = [
-          // User-specific installs (most common for Antigravity/Cursor)
-          path2.join(process.env.LOCALAPPDATA || "", "Programs", ideName, `${ideName}.exe`),
-          path2.join(process.env.LOCALAPPDATA || "", ideName, `${ideName}.exe`),
-          // System installs
-          path2.join(process.env.ProgramFiles || "C:\\Program Files", ideName, `${ideName}.exe`),
-          path2.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", ideName, `${ideName}.exe`),
-          // VS Code specific
-          path2.join(process.env.LOCALAPPDATA || "", "Programs", "Microsoft VS Code", "Code.exe"),
-          path2.join(process.env.ProgramFiles || "C:\\Program Files", "Microsoft VS Code", "Code.exe")
-        ];
-        let foundExe = null;
-        for (const exePath of possibleExePaths) {
-          this.log(`Checking: ${exePath}`);
-          if (fs.existsSync(exePath)) {
-            foundExe = exePath;
-            this.log(`Found executable: ${exePath}`);
-            break;
-          }
-        }
-        if (!foundExe) {
-          this.log("Could not find IDE executable in common locations");
-          return { success: false, message: `Could not find ${ideName}.exe. Please install or create a shortcut manually.` };
-        }
-        const desktopPath = path2.join(process.env.USERPROFILE || "", "Desktop");
-        const shortcutPath = path2.join(desktopPath, `${ideName}.lnk`);
-        const scriptPath = path2.join(os.tmpdir(), "auto_accept_create_shortcut.ps1");
-        try {
-          const psScript = `
-$ErrorActionPreference = "Stop"
-try {
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
-    $shortcut.TargetPath = '${foundExe.replace(/'/g, "''")}'
-    $shortcut.Arguments = '${CDP_FLAG}'
-    $shortcut.WorkingDirectory = '${path2.dirname(foundExe).replace(/'/g, "''")}'
-    $shortcut.Description = '${ideName} with CDP debugging enabled'
-    $shortcut.Save()
-    Write-Output "SUCCESS"
-} catch {
-    Write-Output "ERROR:$($_.Exception.Message)"
-}
-`;
-          fs.writeFileSync(scriptPath, psScript, "utf8");
-          const result = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
-            encoding: "utf8",
-            timeout: 1e4
-          }).trim();
-          if (result === "SUCCESS") {
-            this.log(`Successfully created shortcut: ${shortcutPath}`);
-            return { success: true, path: shortcutPath, target: foundExe };
-          } else if (result.startsWith("ERROR:")) {
-            const err = result.substring(6);
-            this.log(`PowerShell error creating shortcut: ${err}`);
-            return { success: false, message: err };
-          } else {
-            return { success: false, message: `Unexpected result: ${result}` };
-          }
-        } catch (e) {
-          this.log(`Error creating shortcut: ${e.message}`);
-          return { success: false, message: e.message };
-        } finally {
-          try {
-            fs.unlinkSync(scriptPath);
-          } catch (e) {
-          }
-        }
-      }
-      async _createMacOSWrapper() {
-        const ideName = this.getIDEName();
-        const wrapperDir = path2.join(os.homedir(), ".local", "bin");
-        const wrapperPath = path2.join(wrapperDir, `${ideName.toLowerCase()}-cdp`);
-        try {
-          fs.mkdirSync(wrapperDir, { recursive: true });
-          const appBundle = `/Applications/${ideName}.app`;
-          const possibleBinaries = [
-            // Standard macOS app binary location
-            path2.join(appBundle, "Contents", "MacOS", ideName),
-            // Electron app binary location (e.g., VS Code, Cursor)
-            path2.join(appBundle, "Contents", "Resources", "app", "bin", ideName.toLowerCase()),
-            // Some apps use 'Electron' as the binary name
-            path2.join(appBundle, "Contents", "MacOS", "Electron")
-          ];
-          let binaryPath = null;
-          for (const binPath of possibleBinaries) {
-            if (fs.existsSync(binPath)) {
-              binaryPath = binPath;
-              this.log(`Found macOS binary at: ${binPath}`);
-              break;
-            }
-          }
-          if (!binaryPath) {
-            this.log(`No direct binary found, using 'open -a' method`);
-            const scriptContent = `#!/bin/bash
-# Auto Accept - ${ideName} with CDP enabled
-# Generated: ${(/* @__PURE__ */ new Date()).toISOString()}
-# Uses 'open -a' for reliable app launching with arguments
-open -a "${appBundle}" --args ${CDP_FLAG} "$@"
-`;
-            fs.writeFileSync(wrapperPath, scriptContent, { mode: 493 });
-            this.log(`Created macOS wrapper (open -a method): ${wrapperPath}`);
-          } else {
-            const scriptContent = `#!/bin/bash
-# Auto Accept - ${ideName} with CDP enabled
-# Generated: ${(/* @__PURE__ */ new Date()).toISOString()}
-"${binaryPath}" ${CDP_FLAG} "$@"
-`;
-            fs.writeFileSync(wrapperPath, scriptContent, { mode: 493 });
-            this.log(`Created macOS wrapper (direct binary): ${wrapperPath}`);
-          }
-          return {
-            success: true,
-            modified: true,
-            message: `Created wrapper script. Launch via: ${wrapperPath}`,
-            wrapperPath
-          };
-        } catch (e) {
-          this.log(`Error creating macOS wrapper: ${e.message}`);
-          return { success: false, modified: false, message: e.message };
-        }
       }
       async _modifyLinuxDesktop(desktopPath) {
         try {
@@ -5063,6 +5130,24 @@ open -a "${appBundle}" --args ${CDP_FLAG} "$@"
         } catch (e) {
           this.log(`Error modifying .desktop: ${e.message}`);
           return { success: false, modified: false, message: e.message };
+        }
+      }
+      // add flag to shortcut if absent, or update port if incorrect
+      async ensureShortcutHasFlag(shortcut) {
+        const hasCorrectPort = shortcut.args && shortcut.args.includes(`--remote-debugging-port=${BASE_CDP_PORT}`);
+        if (shortcut.hasFlag && hasCorrectPort) {
+          this.log(`Shortcut already has correct CDP port ${BASE_CDP_PORT}`);
+          return { success: true, modified: false, message: "Already has correct CDP flag" };
+        }
+        if (shortcut.hasFlag && !hasCorrectPort) {
+          this.log(`Shortcut has CDP flag but wrong port, updating to ${BASE_CDP_PORT}...`);
+        }
+        if (this.platform === "win32") {
+          return await this._modifyWindowsShortcut(shortcut.path);
+        } else if (this.platform === "darwin") {
+          return await this._createMacOSWrapper();
+        } else {
+          return await this._modifyLinuxDesktop(shortcut.path);
         }
       }
       // get current workspace to relaunch the same workspace
@@ -5144,8 +5229,6 @@ ${launchCommand}
         try {
           fs.writeFileSync(scriptPath, scriptContent, { mode: 493 });
           this.log(`Created macOS relaunch script: ${scriptPath}`);
-          this.log(`Shortcut type: ${shortcut.type}`);
-          this.log(`Launch command: ${launchCommand}`);
           const child = spawn("/bin/bash", [scriptPath], {
             detached: true,
             stdio: "ignore"
@@ -5172,7 +5255,7 @@ ${launchCommand}
         const scriptContent = `#!/bin/bash
 sleep 2
 
-# Method 1: gio launch (most reliable for .desktop files)
+# Method 1: gio launch
 if command -v gio &> /dev/null; then
     gio launch "${shortcut.path}" ${folderArgs} 2>/dev/null && exit 0
 fi
@@ -5199,8 +5282,6 @@ exit 1
         try {
           fs.writeFileSync(scriptPath, scriptContent, { mode: 493 });
           this.log(`Created Linux relaunch script: ${scriptPath}`);
-          this.log(`Desktop file: ${shortcut.path}`);
-          this.log(`Exec command: ${execCommand || "(none parsed)"}`);
           const child = spawn("/bin/bash", [scriptPath], {
             detached: true,
             stdio: "ignore"
@@ -5224,25 +5305,34 @@ exit 1
           return { success: true, action: "none", message: "CDP already available" };
         }
         let shortcuts = await this.findIDEShortcuts();
+        const ideName = this.getIDEName();
         if (shortcuts.length === 0 && this.platform === "win32") {
-          this.log("No shortcuts found. Attempting to auto-create...");
-          const createResult = await this._autoCreateWindowsShortcut();
-          if (createResult.success) {
-            this.log(`Auto-created shortcut: ${createResult.path}`);
-            shortcuts = [{
-              path: createResult.path,
-              hasFlag: true,
-              // We just created it with the flag
-              type: "desktop",
-              target: createResult.target,
-              args: CDP_FLAG
-            }];
+          this.log("No shortcuts found. Searching for executable to create shortcut...");
+          const exePath = await this._findWindowsExecutable(ideName);
+          if (exePath) {
+            const createResult = await this._createWindowsShortcut(ideName, exePath);
+            if (createResult.success) {
+              this.log(`Created shortcut: ${createResult.path}`);
+              shortcuts = [{
+                path: createResult.path,
+                hasFlag: true,
+                type: "desktop",
+                target: createResult.target,
+                args: `${CDP_FLAG} ${CDP_ADDITIONAL_FLAGS}`
+              }];
+            } else {
+              this.log(`Failed to create shortcut: ${createResult.message}`);
+              return {
+                success: false,
+                action: "error",
+                message: `Could not create shortcut: ${createResult.message}`
+              };
+            }
           } else {
-            this.log(`Failed to auto-create shortcut: ${createResult.message}`);
             return {
               success: false,
               action: "error",
-              message: `No IDE shortcuts found and auto-create failed: ${createResult.message}`
+              message: `Could not find ${ideName}.exe. Please ensure the application is installed.`
             };
           }
         } else if (shortcuts.length === 0) {
@@ -5253,9 +5343,8 @@ exit 1
             message: "No IDE shortcuts found. Please create a shortcut first."
           };
         }
-        const primaryShortcut = shortcuts.find(
-          (s) => s.type === "startmenu" || s.type === "wrapper" || s.type === "user"
-        ) || shortcuts[0];
+        const primaryShortcut = shortcuts.find((s) => s.type === "desktop") || shortcuts.find((s) => s.type === "startmenu") || shortcuts.find((s) => s.type === "wrapper" || s.type === "user") || shortcuts[0];
+        this.log(`Using primary shortcut: ${primaryShortcut.path} (type: ${primaryShortcut.type})`);
         const modifyResult = await this.ensureShortcutHasFlag(primaryShortcut);
         if (!modifyResult.success) {
           return {
@@ -5283,7 +5372,7 @@ exit 1
           };
         }
       }
-      // legacy compatibility: wrapper for relaunch with cdp
+      // legacy compatibility
       async launchAndReplace() {
         return await this.relaunchWithCDP();
       }
@@ -5306,7 +5395,7 @@ exit 1
         }
         return "cancelled";
       }
-      // legacy compatibility: wrapper for show relaunch prompt
+      // legacy compatibility
       async showLaunchPrompt() {
         return await this.showRelaunchPrompt();
       }
@@ -5338,9 +5427,10 @@ var FREQ_STATE_KEY = "auto-accept-frequency";
 var BANNED_COMMANDS_KEY = "auto-accept-banned-commands";
 var ROI_STATS_KEY = "auto-accept-roi-stats";
 var SECONDS_PER_CLICK = 5;
+var LICENSE_API = "https://auto-accept-backend.onrender.com/api";
 var INSTANCE_ID = Math.random().toString(36).substring(7);
 var isEnabled = false;
-var isPro = true;
+var isPro = false;
 var isLockedOut = false;
 var pollFrequency = 2e3;
 var bannedCommands = [];
@@ -5400,8 +5490,7 @@ async function activate(context) {
   }
   try {
     isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
-    isPro = true;
-    context.globalState.update(PRO_STATE_KEY, true);
+    isPro = context.globalState.get(PRO_STATE_KEY, false);
     if (isPro) {
       pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1e3);
     } else {
@@ -5423,7 +5512,22 @@ async function activate(context) {
       "chmod -R 777 /"
     ];
     bannedCommands = context.globalState.get(BANNED_COMMANDS_KEY, defaultBannedCommands);
-    log("OVERRIDE MODE: Pro features permanently enabled");
+    verifyLicense(context).then((isValid) => {
+      if (isPro !== isValid) {
+        isPro = isValid;
+        context.globalState.update(PRO_STATE_KEY, isValid);
+        log(`License re-verification: Updated Pro status to ${isValid}`);
+        if (cdpHandler && cdpHandler.setProStatus) {
+          cdpHandler.setProStatus(isValid);
+        }
+        if (!isValid) {
+          pollFrequency = 300;
+          if (backgroundModeEnabled) {
+          }
+        }
+        updateStatusBar();
+      }
+    });
     currentIDE = detectIDE();
     outputChannel = vscode.window.createOutputChannel("Auto Accept");
     context.subscriptions.push(outputChannel);
@@ -5891,6 +5995,25 @@ function updateStatusBar() {
       statusBackgroundItem.hide();
     }
   }
+}
+async function verifyLicense(context) {
+  const userId = context.globalState.get("auto-accept-userId");
+  if (!userId) return false;
+  return new Promise((resolve) => {
+    const https = require("https");
+    https.get(`${LICENSE_API}/check-license?userId=${userId}`, (res) => {
+      let data = "";
+      res.on("data", (chunk) => data += chunk);
+      res.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+          resolve(json.isPro === true);
+        } catch (e) {
+          resolve(false);
+        }
+      });
+    }).on("error", () => resolve(false));
+  });
 }
 async function showVersionNotification(context) {
   const hasShown = context.globalState.get(VERSION_7_0_KEY, false);
