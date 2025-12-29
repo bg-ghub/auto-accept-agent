@@ -1,4 +1,0 @@
-﻿{
-    "isPro":  true,
-    "plan":  "lifetime"
-}
