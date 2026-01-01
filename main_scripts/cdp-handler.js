@@ -3,326 +3,175 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const LOG_PREFIX = '[CDP]';
+const BASE_PORT = 9000;
+const PORT_RANGE = 3; // 9000 +/- 3
 
 class CDPHandler {
-    constructor(startPort = 9000, endPort = 9030, logger = console.log) {
-        this.startPort = startPort;
-        this.endPort = endPort;
+    constructor(logger = console.log) {
         this.logger = logger;
-        this.connections = new Map(); // id -> {ws, injected}
-        this.messageId = 1;
-        this.pendingMessages = new Map();
+        this.connections = new Map(); // port:pageId -> {ws, injected}
         this.isEnabled = false;
-        this.isPro = false;
-        this.logFilePath = null;
+        this.msgId = 1;
     }
 
-    setLogFile(filePath) {
-        this.logFilePath = filePath;
-        if (filePath) {
-            fs.writeFileSync(filePath, `[${new Date().toISOString()}] CDP Log Initialized\n`);
-        }
+    log(msg) {
+        this.logger(`[CDP] ${msg}`);
     }
 
-    log(...args) {
-        const msg = `${LOG_PREFIX} ${args.join(' ')}`;
-        if (this.logger) this.logger(msg);
-    }
-
-    setProStatus(isPro) {
-        this.isPro = isPro;
-    }
-
+    /**
+     * Check if any CDP port in the target range is active
+     */
     async isCDPAvailable() {
-        const instances = await this.scanForInstances();
-        return instances.length > 0;
-    }
-
-    async scanForInstances() {
-        const instances = [];
-        const portsToScan = [];
-        for (let p = this.startPort; p <= this.endPort; p++) portsToScan.push(p);
-        if (!portsToScan.includes(9222)) portsToScan.push(9222);
-
-        for (const port of portsToScan) {
+        for (let port = BASE_PORT - PORT_RANGE; port <= BASE_PORT + PORT_RANGE; port++) {
             try {
-                const pages = await this.getPages(port);
-                if (pages.length > 0) instances.push({ port, pages });
+                const pages = await this._getPages(port);
+                if (pages.length > 0) return true;
             } catch (e) { }
         }
-        return instances;
+        return false;
     }
 
-    getPages(port) {
-        return new Promise((resolve, reject) => {
-            const req = http.get({ hostname: '127.0.0.1', port, path: '/json/list', timeout: 1000 }, (res) => {
-                let data = '';
-                res.on('data', chunk => data += chunk);
-                res.on('end', () => {
-                    try { resolve(JSON.parse(data).filter(p => p.webSocketDebuggerUrl)); }
-                    catch (e) { reject(e); }
-                });
-            });
-            req.on('error', reject);
-            req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-        });
-    }
-
+    /**
+     * Start/maintain the CDP connection and injection loop
+     */
     async start(config) {
         this.isEnabled = true;
-        const instances = await this.scanForInstances();
+        this.log(`Scanning ports ${BASE_PORT - PORT_RANGE} to ${BASE_PORT + PORT_RANGE}...`);
 
-        for (const instance of instances) {
-            for (const page of instance.pages) {
-                if (!this.connections.has(page.id)) {
-                    await this.connectToPage(page);
+        for (let port = BASE_PORT - PORT_RANGE; port <= BASE_PORT + PORT_RANGE; port++) {
+            try {
+                const pages = await this._getPages(port);
+                for (const page of pages) {
+                    const id = `${port}:${page.id}`;
+                    if (!this.connections.has(id)) {
+                        await this._connect(id, page.webSocketDebuggerUrl);
+                    }
+                    await this._inject(id, config);
                 }
-                if (this.connections.has(page.id)) {
-                    await this.injectAndStart(page.id, config);
-                }
-            }
+            } catch (e) { }
         }
     }
 
     async stop() {
         this.isEnabled = false;
-        // Fire stop commands in parallel (don't wait for each one)
-        const stopPromises = [];
-        for (const [pageId] of this.connections) {
-            stopPromises.push(
-                this.sendCommand(pageId, 'Runtime.evaluate', {
-                    expression: 'if(typeof window !== "undefined" && window.__autoAcceptStop) window.__autoAcceptStop()'
-                }).catch(() => { }) // Ignore errors
-            );
+        for (const [id, conn] of this.connections) {
+            try {
+                await this._evaluate(id, 'if(window.__autoAcceptStop) window.__autoAcceptStop()');
+                conn.ws.close();
+            } catch (e) { }
         }
-        // Disconnect immediately, don't wait for commands
-        this.disconnectAll();
-        // Let promises settle in background
-        Promise.allSettled(stopPromises);
+        this.connections.clear();
     }
 
-    async connectToPage(page) {
+    async _getPages(port) {
+        return new Promise((resolve, reject) => {
+            const req = http.get({ hostname: '127.0.0.1', port, path: '/json/list', timeout: 500 }, (res) => {
+                let body = '';
+                res.on('data', chunk => body += chunk);
+                res.on('end', () => {
+                    try {
+                        const pages = JSON.parse(body);
+                        // Filter for pages that look like IDE windows (usually type "page" or "background_page")
+                        resolve(pages.filter(p => p.webSocketDebuggerUrl && (p.type === 'page' || p.type === 'webview')));
+                    } catch (e) { resolve([]); }
+                });
+            });
+            req.on('error', () => resolve([]));
+            req.on('timeout', () => { req.destroy(); resolve([]); });
+        });
+    }
+
+    async _connect(id, url) {
         return new Promise((resolve) => {
-            const ws = new WebSocket(page.webSocketDebuggerUrl);
+            const ws = new WebSocket(url);
             ws.on('open', () => {
-                this.connections.set(page.id, { ws, injected: false });
+                this.connections.set(id, { ws, injected: false });
+                this.log(`Connected to page ${id}`);
                 resolve(true);
             });
-            ws.on('message', (data) => {
-                try {
-                    const msg = JSON.parse(data.toString());
-                    if (msg.id && this.pendingMessages.has(msg.id)) {
-                        const { resolve: res, reject: rej } = this.pendingMessages.get(msg.id);
-                        this.pendingMessages.delete(msg.id);
-                        msg.error ? rej(new Error(msg.error.message)) : res(msg.result);
-                    }
-                } catch (e) { }
-            });
-            ws.on('error', (err) => {
-                this.log(`WS Error on ${page.id}: ${err.message}`);
-                this.connections.delete(page.id);
-                resolve(false);
-            });
+            ws.on('error', () => resolve(false));
             ws.on('close', () => {
-                this.connections.delete(page.id);
+                this.connections.delete(id);
+                this.log(`Disconnected from page ${id}`);
             });
         });
     }
 
-    async injectAndStart(pageId, config) {
-        const conn = this.connections.get(pageId);
+    async _inject(id, config) {
+        const conn = this.connections.get(id);
         if (!conn) return;
 
         try {
-            // 1. Inject core bundle only once
             if (!conn.injected) {
-                const script = this.getComposedScript();
-                const result = await this.sendCommand(pageId, 'Runtime.evaluate', {
-                    expression: script,
-                    userGesture: true,
-                    awaitPromise: true
-                });
-
-                if (result.exceptionDetails) {
-                    this.log(`Injection Exception on ${pageId}: ${result.exceptionDetails.text} ${result.exceptionDetails.exception.description}`);
-                } else {
-                    conn.injected = true;
-                    this.log(`Injected core onto ${pageId}`);
-                }
+                const scriptPath = path.join(__dirname, '..', 'main_scripts', 'full_cdp_script.js');
+                const script = fs.readFileSync(scriptPath, 'utf8');
+                await this._evaluate(id, script);
+                conn.injected = true;
+                this.log(`Script injected into ${id}`);
             }
 
-            // 2. Start/Update configuration
-            if (conn.injected) {
-                const res = await this.sendCommand(pageId, 'Runtime.evaluate', {
-                    expression: `(function(){
-                        const g = (typeof window !== 'undefined') ? window : (typeof globalThis !== 'undefined' ? globalThis : self);
-                        if(g && typeof g.__autoAcceptStart === 'function'){
-                            g.__autoAcceptStart(${JSON.stringify(config)});
-                            return "started";
-                        }
-                        return "not_found";
-                    })()`
-                });
-                this.log(`Start signal on ${pageId}: ${JSON.stringify(res.result?.value || res)}`);
-            }
+            await this._evaluate(id, `if(window.__autoAcceptStart) window.__autoAcceptStart(${JSON.stringify(config)})`);
         } catch (e) {
-            this.log(`Failed to start/update on ${pageId}: ${e.message}`);
+            this.log(`Injection failed for ${id}: ${e.message}`);
         }
     }
 
-    getComposedScript() {
-        const scriptPath = path.join(__dirname, '..', 'main_scripts', 'full_cdp_script.js');
-        return fs.readFileSync(scriptPath, 'utf8');
-    }
+    async _evaluate(id, expression) {
+        const conn = this.connections.get(id);
+        if (!conn || conn.ws.readyState !== WebSocket.OPEN) return;
 
-    sendCommand(pageId, method, params = {}) {
-        const conn = this.connections.get(pageId);
-        if (!conn || conn.ws.readyState !== WebSocket.OPEN) return Promise.reject('dead');
-        const id = this.messageId++;
         return new Promise((resolve, reject) => {
-            this.pendingMessages.set(id, { resolve, reject });
-            conn.ws.send(JSON.stringify({ id, method, params }));
-            setTimeout(() => {
-                if (this.pendingMessages.has(id)) {
-                    this.pendingMessages.delete(id);
-                    reject(new Error('timeout'));
+            const currentId = this.msgId++;
+            const timeout = setTimeout(() => reject(new Error('CDP Timeout')), 2000);
+
+            const onMessage = (data) => {
+                const msg = JSON.parse(data.toString());
+                if (msg.id === currentId) {
+                    conn.ws.off('message', onMessage);
+                    clearTimeout(timeout);
+                    resolve(msg.result);
                 }
-            }, 2000); // Fast timeout - dead connections fail quickly
+            };
+
+            conn.ws.on('message', onMessage);
+            conn.ws.send(JSON.stringify({
+                id: currentId,
+                method: 'Runtime.evaluate',
+                params: { expression, userGesture: true, awaitPromise: true }
+            }));
         });
     }
 
-    async hideBackgroundOverlay() {
-        for (const [pageId] of this.connections) {
-            try {
-                await this.sendCommand(pageId, 'Runtime.evaluate', {
-                    expression: 'if(typeof window !== "undefined" && typeof hideOverlay === "function") hideOverlay()'
-                });
-            } catch (e) { }
-        }
-    }
-
     async getStats() {
-        const aggregatedStats = { clicks: 0, blocked: 0, fileEdits: 0, terminalCommands: 0, actionsWhileAway: 0 };
-
-        for (const [pageId] of this.connections) {
+        const stats = { clicks: 0, blocked: 0, fileEdits: 0, terminalCommands: 0 };
+        for (const [id] of this.connections) {
             try {
-                const result = await this.sendCommand(pageId, 'Runtime.evaluate', {
-                    expression: '(function(){ if(typeof window !== "undefined" && window.__autoAcceptGetStats) return JSON.stringify(window.__autoAcceptGetStats()); return "{}"; })()',
-                    returnByValue: true
-                });
-
-                if (result.result?.value) {
-                    const stats = JSON.parse(result.result.value);
-                    aggregatedStats.clicks += stats.clicks || 0;
-                    aggregatedStats.blocked += stats.blocked || 0;
-                    aggregatedStats.fileEdits += stats.fileEdits || 0;
-                    aggregatedStats.terminalCommands += stats.terminalCommands || 0;
-                    aggregatedStats.actionsWhileAway += stats.actionsWhileAway || 0;
-                }
-            } catch (e) {
-                // Ignore errors for individual pages
-            }
-        }
-
-        return aggregatedStats;
-    }
-
-    async resetStats() {
-        const aggregatedStats = { clicks: 0, blocked: 0, fileEdits: 0, terminalCommands: 0, actionsWhileAway: 0 };
-
-        for (const [pageId] of this.connections) {
-            try {
-                const result = await this.sendCommand(pageId, 'Runtime.evaluate', {
-                    expression: '(function(){ if(typeof window !== "undefined" && window.__autoAcceptResetStats) return JSON.stringify(window.__autoAcceptResetStats()); return "{}"; })()',
-                    returnByValue: true
-                });
-
-                if (result.result?.value) {
-                    const stats = JSON.parse(result.result.value);
-                    aggregatedStats.clicks += stats.clicks || 0;
-                    aggregatedStats.blocked += stats.blocked || 0;
-                    aggregatedStats.fileEdits += stats.fileEdits || 0;
-                    aggregatedStats.terminalCommands += stats.terminalCommands || 0;
-                    aggregatedStats.actionsWhileAway += stats.actionsWhileAway || 0;
-                }
-            } catch (e) {
-                // Ignore errors for individual pages
-            }
-        }
-
-        return aggregatedStats;
-    }
-
-    async getSessionSummary() {
-        const summary = { clicks: 0, fileEdits: 0, terminalCommands: 0, blocked: 0 };
-
-        for (const [pageId] of this.connections) {
-            try {
-                const result = await this.sendCommand(pageId, 'Runtime.evaluate', {
-                    expression: '(function(){ if(typeof window !== "undefined" && window.__autoAcceptGetSessionSummary) return JSON.stringify(window.__autoAcceptGetSessionSummary()); return "{}"; })()',
-                    returnByValue: true
-                });
-
-                if (result.result?.value) {
-                    const stats = JSON.parse(result.result.value);
-                    summary.clicks += stats.clicks || 0;
-                    summary.fileEdits += stats.fileEdits || 0;
-                    summary.terminalCommands += stats.terminalCommands || 0;
-                    summary.blocked += stats.blocked || 0;
+                const res = await this._evaluate(id, 'JSON.stringify(window.__autoAcceptGetStats ? window.__autoAcceptGetStats() : {})');
+                if (res?.result?.value) {
+                    const s = JSON.parse(res.result.value);
+                    stats.clicks += s.clicks || 0;
+                    stats.blocked += s.blocked || 0;
+                    stats.fileEdits += s.fileEdits || 0;
+                    stats.terminalCommands += s.terminalCommands || 0;
                 }
             } catch (e) { }
         }
-
-        // Calculate time estimate
-        const baseSecs = summary.clicks * 5;
-        const minMins = Math.max(1, Math.floor((baseSecs * 0.8) / 60));
-        const maxMins = Math.ceil((baseSecs * 1.2) / 60);
-        summary.estimatedTimeSaved = summary.clicks > 0 ? `${minMins}–${maxMins}` : null;
-
-        return summary;
+        return stats;
     }
 
-    async getAwayActions() {
-        let total = 0;
-
-        for (const [pageId] of this.connections) {
-            try {
-                const result = await this.sendCommand(pageId, 'Runtime.evaluate', {
-                    expression: '(function(){ if(typeof window !== "undefined" && window.__autoAcceptGetAwayActions) return window.__autoAcceptGetAwayActions(); return 0; })()',
-                    returnByValue: true
-                });
-
-                if (result.result?.value) {
-                    total += parseInt(result.result.value) || 0;
-                }
-            } catch (e) { }
-        }
-
-        return total;
-    }
-
-    // Push focus state from extension to browser (more reliable than browser-side detection)
+    async getSessionSummary() { return this.getStats(); } // Compatibility
     async setFocusState(isFocused) {
-        for (const [pageId] of this.connections) {
+        for (const [id] of this.connections) {
             try {
-                await this.sendCommand(pageId, 'Runtime.evaluate', {
-                    expression: `(function(){ 
-                        if(typeof window !== "undefined" && window.__autoAcceptSetFocusState) {
-                            window.__autoAcceptSetFocusState(${isFocused});
-                        }
-                    })()`
-                });
+                await this._evaluate(id, `if(window.__autoAcceptSetFocusState) window.__autoAcceptSetFocusState(${isFocused})`);
             } catch (e) { }
         }
-        this.log(`Focus state pushed to all pages: ${isFocused}`);
     }
 
     getConnectionCount() { return this.connections.size; }
-    disconnectAll() {
-        for (const [, conn] of this.connections) try { conn.ws.close(); } catch (e) { }
-        this.connections.clear();
-    }
+    async getAwayActions() { return 0; } // Placeholder
+    async resetStats() { return { clicks: 0, blocked: 0 }; } // Placeholder
+    async hideBackgroundOverlay() { } // Placeholder
 }
 
 module.exports = { CDPHandler };

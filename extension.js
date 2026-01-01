@@ -184,22 +184,9 @@ async function activate(context) {
         // 3. Initialize Handlers (Lazy Load) - Both IDEs use CDP now
         try {
             const { CDPHandler } = require('./main_scripts/cdp-handler');
-            const { Relauncher, BASE_CDP_PORT } = require('./main_scripts/relauncher');
+            const { Relauncher } = require('./main_scripts/relauncher');
 
-            cdpHandler = new CDPHandler(BASE_CDP_PORT, BASE_CDP_PORT + 10, log);
-            if (cdpHandler.setProStatus) {
-                cdpHandler.setProStatus(isPro);
-            }
-
-            // Persistence logging
-            try {
-                const logPath = path.join(context.extensionPath, 'auto-accept-cdp.log');
-                cdpHandler.setLogFile(logPath);
-                log(`CDP logging to: ${logPath}`);
-            } catch (e) {
-                log(`Failed to set log file: ${e.message}`);
-            }
-
+            cdpHandler = new CDPHandler(log);
             relauncher = new Relauncher(log);
             log(`CDP handlers initialized for ${currentIDE}.`);
         } catch (err) {
@@ -274,7 +261,7 @@ async function activate(context) {
 }
 
 async function ensureCDPOrPrompt(showPrompt = false) {
-    if (!cdpHandler) return;
+    if (!cdpHandler) return false;
 
     log('Checking for active CDP session...');
     const cdpAvailable = await cdpHandler.isCDPAvailable();
@@ -282,25 +269,32 @@ async function ensureCDPOrPrompt(showPrompt = false) {
 
     if (cdpAvailable) {
         log('CDP is active and available.');
+        return true;
     } else {
-        log('CDP not found on expected ports (9000-9030).');
-        // Only show the relaunch dialog if explicitly requested (user action)
+        log('CDP not found on target ports (9000 +/- 3).');
         if (showPrompt && relauncher) {
-            log('Prompting user for relaunch...');
-            await relauncher.showRelaunchPrompt();
-        } else {
-            log('Skipping relaunch prompt (startup). User can click status bar to trigger.');
+            log('Initiating CDP setup and relaunch flow...');
+            await relauncher.ensureCDPAndRelaunch();
         }
+        return false;
     }
 }
 
 async function checkEnvironmentAndStart() {
     if (isEnabled) {
         log('Initializing Auto Accept environment...');
-        await ensureCDPOrPrompt(false);
-        await startPolling();
-        // Start stats collection if already enabled on startup
-        startStatsCollection(globalContext);
+        const cdpReady = await ensureCDPOrPrompt(false);
+
+        if (!cdpReady) {
+            // CDP not available - reset to OFF state so user can trigger setup via toggle
+            log('Auto Accept was enabled but CDP is not available. Resetting to OFF state.');
+            isEnabled = false;
+            await globalContext.globalState.update(GLOBAL_STATE_KEY, false);
+        } else {
+            await startPolling();
+            // Start stats collection if already enabled on startup
+            startStatsCollection(globalContext);
+        }
     }
     updateStatusBar();
 }
@@ -310,6 +304,16 @@ async function handleToggle(context) {
     log(`  Previous isEnabled: ${isEnabled}`);
 
     try {
+        // Check CDP availability first
+        const cdpAvailable = cdpHandler ? await cdpHandler.isCDPAvailable() : false;
+
+        // If trying to enable but CDP not available, prompt for relaunch (don't change state)
+        if (!isEnabled && !cdpAvailable && relauncher) {
+            log('Auto Accept: CDP not available. Prompting for setup/relaunch.');
+            await relauncher.ensureCDPAndRelaunch();
+            return; // Don't change state - toggle stays OFF
+        }
+
         isEnabled = !isEnabled;
         log(`  New isEnabled: ${isEnabled}`);
 
@@ -355,11 +359,8 @@ async function handleRelaunch() {
         return;
     }
 
-    log('Initiating Relaunch...');
-    const result = await relauncher.relaunchWithCDP();
-    if (!result.success) {
-        vscode.window.showErrorMessage(`Relaunch failed: ${result.message}`);
-    }
+    log('Initiating Relaunch sequence...');
+    await relauncher.ensureCDPAndRelaunch();
 }
 
 async function handleFrequencyUpdate(context, freq) {
@@ -768,17 +769,21 @@ function updateStatusBar() {
         let statusText = 'ON';
         let tooltip = `Auto Accept is running.`;
         let bgColor = undefined;
+        let icon = '$(check)';
 
-        if (cdpHandler && cdpHandler.getConnectionCount() > 0) {
+        const cdpConnected = cdpHandler && cdpHandler.getConnectionCount() > 0;
+
+        if (cdpConnected) {
             tooltip += ' (CDP Connected)';
         }
 
         if (isLockedOut) {
             statusText = 'PAUSED (Multi-window)';
             bgColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+            icon = '$(sync~spin)';
         }
 
-        statusBarItem.text = `$(check) Auto Accept: ${statusText}`;
+        statusBarItem.text = `${icon} Auto Accept: ${statusText}`;
         statusBarItem.tooltip = tooltip;
         statusBarItem.backgroundColor = bgColor;
 
