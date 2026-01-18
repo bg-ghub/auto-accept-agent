@@ -87,6 +87,11 @@
                     "default": true,
                     "description": "Auto-accept file access permission dialogs (Allow This Conversation)"
                 },
+                "auto-accept.autoContinue": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Auto-send 'continue' when agent is waiting for user input"
+                },
                 "auto-accept.autoRetryOnError": {
                     "type": "boolean",
                     "default": true,

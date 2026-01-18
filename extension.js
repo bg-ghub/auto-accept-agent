@@ -173,6 +173,9 @@ function startLoop() {
         if (getConfig('acceptFileAccess')) {
             commands.push('antigravity.allowThisConversation');
         }
+        if (getConfig('autoContinue')) {
+            commands.push('antigravity.agent.continueTask');
+        }
 
         for (const cmd of commands) {
             try {

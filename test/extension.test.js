@@ -101,6 +101,7 @@ const DEFAULT_CONFIG = {
     acceptSuggestions: true,
     acceptEditBlocks: true,
     acceptFileAccess: true,
+    autoContinue: false,
     autoRetryOnError: true,
     autoRetryDelay: 1000,
     maxRetryAttempts: 3,
@@ -129,6 +130,7 @@ const ANTIGRAVITY_COMMANDS = [
     'antigravity.acceptSuggestion',
     'antigravity.agent.acceptEditBlock',
     'antigravity.allowThisConversation',
+    'antigravity.agent.continueTask',
     'antigravity.agent.retryAgentStep'
 ];
 
@@ -352,6 +354,10 @@ describe('Configuration Defaults', () => {
         assert.strictEqual(DEFAULT_CONFIG.acceptFileAccess, true);
     });
 
+    test('autoContinue should default to false', () => {
+        assert.strictEqual(DEFAULT_CONFIG.autoContinue, false);
+    });
+
     test('autoRetryOnError should default to true', () => {
         assert.strictEqual(DEFAULT_CONFIG.autoRetryOnError, true);
     });
@@ -401,6 +407,10 @@ describe('Antigravity Commands', () => {
         assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.allowThisConversation'));
     });
 
+    test('should have continueTask command for auto-continue', () => {
+        assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.agent.continueTask'));
+    });
+
     test('should have retryAgentStep command for auto-retry', () => {
         assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.agent.retryAgentStep'));
     });
@@ -411,8 +421,8 @@ describe('Antigravity Commands', () => {
         });
     });
 
-    test('should have at least 6 commands', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.length >= 6);
+    test('should have at least 7 commands', () => {
+        assert.ok(ANTIGRAVITY_COMMANDS.length >= 7);
     });
 });
 
