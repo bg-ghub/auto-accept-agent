@@ -92,6 +92,11 @@
                     "default": false,
                     "description": "Auto-send 'continue' when agent is waiting for user input"
                 },
+                "auto-accept.acceptAll": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Auto-accept all file changes at once (Accept All button)"
+                },
                 "auto-accept.autoRetryOnError": {
                     "type": "boolean",
                     "default": true,

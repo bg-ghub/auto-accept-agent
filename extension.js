@@ -176,6 +176,9 @@ function startLoop() {
         if (getConfig('autoContinue')) {
             commands.push('antigravity.agent.continueTask');
         }
+        if (getConfig('acceptAll')) {
+            commands.push('antigravity.acceptAll');
+        }
 
         for (const cmd of commands) {
             try {
