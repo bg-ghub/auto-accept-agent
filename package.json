@@ -38,14 +38,6 @@
             {
                 "command": "auto-accept.resetBannedCommands",
                 "title": "Auto Accept: Reset Banned Commands"
-            },
-            {
-                "command": "auto-accept.resetCounter",
-                "title": "Auto Accept: Reset Activity Counter"
-            },
-            {
-                "command": "auto-accept.showStats",
-                "title": "Auto Accept: Show Statistics"
             }
         ],
         "keybindings": [
@@ -70,10 +62,30 @@
                     "maximum": 5000,
                     "description": "Polling interval in milliseconds (100-5000)"
                 },
-                "auto-accept.showActivityCounter": {
+                "auto-accept.acceptAgentSteps": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Show activity counter in status bar"
+                    "description": "Auto-accept agent steps (tool calls, file edits, etc.)"
+                },
+                "auto-accept.acceptTerminalCommands": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Auto-accept terminal/shell commands"
+                },
+                "auto-accept.acceptSuggestions": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Auto-accept inline code suggestions"
+                },
+                "auto-accept.acceptEditBlocks": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Auto-accept code edit blocks"
+                },
+                "auto-accept.acceptFileAccess": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Auto-accept file access permission dialogs (Allow This Conversation)"
                 },
                 "auto-accept.autoRetryOnError": {
                     "type": "boolean",

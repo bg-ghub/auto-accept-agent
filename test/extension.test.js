@@ -96,7 +96,11 @@ function getSessionDuration(startTime) {
 const DEFAULT_CONFIG = {
     enabled: true,
     pollingInterval: 500,
-    showActivityCounter: true,
+    acceptAgentSteps: true,
+    acceptTerminalCommands: true,
+    acceptSuggestions: true,
+    acceptEditBlocks: true,
+    acceptFileAccess: true,
     autoRetryOnError: true,
     autoRetryDelay: 1000,
     maxRetryAttempts: 3,
@@ -124,6 +128,7 @@ const ANTIGRAVITY_COMMANDS = [
     'antigravity.terminal.accept',
     'antigravity.acceptSuggestion',
     'antigravity.agent.acceptEditBlock',
+    'antigravity.allowThisConversation',
     'antigravity.agent.retryAgentStep'
 ];
 
@@ -327,8 +332,24 @@ describe('Configuration Defaults', () => {
         assert.ok(DEFAULT_CONFIG.pollingInterval <= 5000, 'Should be at most 5000ms');
     });
 
-    test('showActivityCounter should default to true', () => {
-        assert.strictEqual(DEFAULT_CONFIG.showActivityCounter, true);
+    test('acceptAgentSteps should default to true', () => {
+        assert.strictEqual(DEFAULT_CONFIG.acceptAgentSteps, true);
+    });
+
+    test('acceptTerminalCommands should default to true', () => {
+        assert.strictEqual(DEFAULT_CONFIG.acceptTerminalCommands, true);
+    });
+
+    test('acceptSuggestions should default to true', () => {
+        assert.strictEqual(DEFAULT_CONFIG.acceptSuggestions, true);
+    });
+
+    test('acceptEditBlocks should default to true', () => {
+        assert.strictEqual(DEFAULT_CONFIG.acceptEditBlocks, true);
+    });
+
+    test('acceptFileAccess should default to true', () => {
+        assert.strictEqual(DEFAULT_CONFIG.acceptFileAccess, true);
     });
 
     test('autoRetryOnError should default to true', () => {
@@ -376,6 +397,10 @@ describe('Antigravity Commands', () => {
         assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.agent.acceptEditBlock'));
     });
 
+    test('should have allowThisConversation command for file access', () => {
+        assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.allowThisConversation'));
+    });
+
     test('should have retryAgentStep command for auto-retry', () => {
         assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.agent.retryAgentStep'));
     });
@@ -386,8 +411,8 @@ describe('Antigravity Commands', () => {
         });
     });
 
-    test('should have at least 5 commands', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.length >= 5);
+    test('should have at least 6 commands', () => {
+        assert.ok(ANTIGRAVITY_COMMANDS.length >= 6);
     });
 });
 

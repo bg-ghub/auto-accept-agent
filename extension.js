@@ -6,23 +6,15 @@ const vscode = require('vscode');
 // Features:
 // - Uses native Antigravity commands (no CDP required)
 // - VS Code Settings UI integration
-// - Activity counter in status bar
 // - Auto-retry on agent errors
 // - Banned command safety protection
 // - Zero network calls, zero telemetry
 // ============================================================
 
-const COUNTER_STATE_KEY = 'auto-accept-counter';
-const SESSION_START_KEY = 'auto-accept-session-start';
-
 let enabled = true;
 let autoAcceptInterval = null;
 let statusBarItem = null;
 let globalContext = null;
-
-// Activity tracking
-let acceptedCount = 0;
-let sessionStartTime = null;
 
 // Auto-retry state
 let consecutiveRetries = 0;
@@ -53,13 +45,6 @@ function activate(context) {
 
     // Load saved state
     enabled = getConfig('enabled');
-    acceptedCount = context.globalState.get(COUNTER_STATE_KEY, 0);
-    sessionStartTime = context.globalState.get(SESSION_START_KEY, Date.now());
-
-    // Save session start if new session
-    if (!context.globalState.get(SESSION_START_KEY)) {
-        context.globalState.update(SESSION_START_KEY, sessionStartTime);
-    }
 
     // Create status bar item
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 10000);
@@ -72,9 +57,7 @@ function activate(context) {
     context.subscriptions.push(
         vscode.commands.registerCommand('auto-accept.toggle', () => toggleAutoAccept()),
         vscode.commands.registerCommand('auto-accept.editBannedCommands', () => editBannedCommands()),
-        vscode.commands.registerCommand('auto-accept.resetBannedCommands', () => resetBannedCommands()),
-        vscode.commands.registerCommand('auto-accept.resetCounter', () => resetCounter()),
-        vscode.commands.registerCommand('auto-accept.showStats', () => showStats())
+        vscode.commands.registerCommand('auto-accept.resetBannedCommands', () => resetBannedCommands())
     );
 
     // Listen for configuration changes
@@ -92,7 +75,6 @@ function activate(context) {
     }
 
     log(`Auto Accept activated. Enabled: ${enabled}`);
-    log(`Activity counter: ${acceptedCount}`);
 }
 
 /**
@@ -149,34 +131,15 @@ async function toggleAutoAccept() {
 function updateStatusBar() {
     if (!statusBarItem) return;
 
-    const showCounter = getConfig('showActivityCounter');
-    const counterDisplay = showCounter && acceptedCount > 0 ? ` (${acceptedCount})` : '';
-
     if (enabled) {
-        statusBarItem.text = `$(check) Auto Accept: ON${counterDisplay}`;
-        statusBarItem.tooltip = `Auto-Accept is running. Click to pause.\n\nAccepted: ${acceptedCount} steps\nSession: ${getSessionDuration()}\n\nTip: Use Command Palette for more options`;
+        statusBarItem.text = '$(check) Auto Accept: ON';
+        statusBarItem.tooltip = 'Auto-Accept is running. Click to pause.\n\nTip: Use Command Palette for more options';
         statusBarItem.backgroundColor = undefined;
     } else {
-        statusBarItem.text = `$(circle-slash) Auto Accept: OFF${counterDisplay}`;
+        statusBarItem.text = '$(circle-slash) Auto Accept: OFF';
         statusBarItem.tooltip = 'Auto-Accept is paused. Click to resume.';
         statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
     }
-}
-
-/**
- * Get formatted session duration
- */
-function getSessionDuration() {
-    if (!sessionStartTime) return 'N/A';
-
-    const duration = Date.now() - sessionStartTime;
-    const hours = Math.floor(duration / (1000 * 60 * 60));
-    const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
-
-    if (hours > 0) {
-        return `${hours}h ${minutes}m`;
-    }
-    return `${minutes}m`;
 }
 
 /**
@@ -192,31 +155,32 @@ function startLoop() {
     autoAcceptInterval = setInterval(async () => {
         if (!enabled) return;
 
-        let acceptedSomething = false;
+        // Build list of commands based on settings
+        const commands = [];
 
-        // Try multiple Antigravity commands
-        const commands = [
-            'antigravity.agent.acceptAgentStep',
-            'antigravity.terminal.accept',
-            'antigravity.acceptSuggestion',
-            'antigravity.agent.acceptEditBlock'
-        ];
+        if (getConfig('acceptAgentSteps')) {
+            commands.push('antigravity.agent.acceptAgentStep');
+        }
+        if (getConfig('acceptTerminalCommands')) {
+            commands.push('antigravity.terminal.accept');
+        }
+        if (getConfig('acceptSuggestions')) {
+            commands.push('antigravity.acceptSuggestion');
+        }
+        if (getConfig('acceptEditBlocks')) {
+            commands.push('antigravity.agent.acceptEditBlock');
+        }
+        if (getConfig('acceptFileAccess')) {
+            commands.push('antigravity.allowThisConversation');
+        }
 
         for (const cmd of commands) {
             try {
                 await vscode.commands.executeCommand(cmd);
-                acceptedSomething = true;
+                consecutiveRetries = 0; // Reset retry counter on success
             } catch (e) {
                 // Command may not exist or no pending action - this is normal
             }
-        }
-
-        // Increment counter if we accepted something
-        if (acceptedSomething) {
-            acceptedCount++;
-            await globalContext.globalState.update(COUNTER_STATE_KEY, acceptedCount);
-            updateStatusBar();
-            consecutiveRetries = 0; // Reset retry counter on success
         }
 
         // Check for auto-retry on error
@@ -252,7 +216,7 @@ async function checkAndRetry() {
 
         // Show notification on first retry
         if (consecutiveRetries === 1) {
-            vscode.window.showInformationMessage(`🔄 Auto-Retry: Retrying agent step...`);
+            vscode.window.showInformationMessage('🔄 Auto-Retry: Retrying agent step...');
         }
 
         // Check if we've exceeded max retries
@@ -384,62 +348,6 @@ async function resetBannedCommands() {
 
         vscode.window.showInformationMessage('Banned commands reset to defaults.');
         log('Banned commands reset to defaults');
-    }
-}
-
-/**
- * Reset the activity counter
- */
-async function resetCounter() {
-    const choice = await vscode.window.showWarningMessage(
-        `Reset activity counter? (Currently: ${acceptedCount})`,
-        'Yes', 'No'
-    );
-
-    if (choice === 'Yes') {
-        acceptedCount = 0;
-        sessionStartTime = Date.now();
-        await globalContext.globalState.update(COUNTER_STATE_KEY, 0);
-        await globalContext.globalState.update(SESSION_START_KEY, sessionStartTime);
-        updateStatusBar();
-        vscode.window.showInformationMessage('Activity counter reset to 0.');
-        log('Activity counter reset');
-    }
-}
-
-/**
- * Show statistics popup
- */
-async function showStats() {
-    const bannedCommands = getConfig('bannedCommands') || [];
-    const pollingInterval = getConfig('pollingInterval');
-    const autoRetryEnabled = getConfig('autoRetryOnError');
-
-    const statsMessage = [
-        `📊 Auto-Accept Statistics`,
-        ``,
-        `✅ Steps Accepted: ${acceptedCount}`,
-        `⏱️ Session Duration: ${getSessionDuration()}`,
-        ``,
-        `⚙️ Configuration:`,
-        `   • Polling Interval: ${pollingInterval}ms`,
-        `   • Auto-Retry: ${autoRetryEnabled ? 'Enabled' : 'Disabled'}`,
-        `   • Banned Patterns: ${bannedCommands.length}`,
-        ``,
-        `Status: ${enabled ? '🟢 Running' : '🔴 Paused'}`
-    ].join('\n');
-
-    const action = await vscode.window.showInformationMessage(
-        statsMessage,
-        { modal: true },
-        'Reset Counter',
-        'Open Settings'
-    );
-
-    if (action === 'Reset Counter') {
-        await resetCounter();
-    } else if (action === 'Open Settings') {
-        await vscode.commands.executeCommand('workbench.action.openSettings', 'auto-accept');
     }
 }
 
