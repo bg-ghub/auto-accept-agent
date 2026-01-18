@@ -1,81 +1,92 @@
-# Auto Accept for Antigravity
+# Auto Accept Agent
 
-## Run 3 AI agents in parallel. Zero babysitting.
+**Simple, safe, and private auto-accept for Antigravity Agent.**
 
-Stop watching tabs. Auto Accept keeps every Antigravity conversation moving — accepting file edits, terminal commands, and recovery prompts automatically.
+Automatically accepts Antigravity agent steps without limits. No tracking, no network calls, no paid features.
 
----
+## ✨ Features
 
-![background mode](https://raw.githubusercontent.com/MunKhin/auto-accept-agent/master/media/background-mode.png)
+- ✅ **Auto-accepts agent steps** - Hands-free automation
+- 🛡️ **Safety protection** - Blocks dangerous commands like `rm -rf /`
+- 🔒 **100% Private** - Zero network calls, zero telemetry
+- ⚡ **Lightweight** - Simple, fast, no dependencies
+- 🎯 **Native integration** - Uses Antigravity's built-in commands
 
----
+## 🚀 Installation
 
-## Why Auto Accept?
+### Option 1: Install from VSIX
+1. Download the latest `.vsix` file from [Releases](https://github.com/MunKhin/auto-accept-agent/releases)
+2. Open Antigravity IDE
+3. Go to Extensions → Click `...` menu → Install from VSIX...
+4. Select the downloaded `.vsix` file
+5. Restart the IDE
 
-Antigravity's multi-agent workflow is powerful, but it stops every time the agent needs approval. 
+### Option 2: Build from Source
+```bash
+git clone https://github.com/MunKhin/auto-accept-agent.git
+cd auto-accept-agent
+npm install -g @vscode/vsce
+vsce package
+```
+Then install the generated `.vsix` file as described above.
 
-**That's dozens of interruptions per hour.**
+## ⌨️ Keyboard Shortcuts
 
-Auto Accept eliminates the wait:
-- ✅ **File edits** — Auto-applied
-- ✅ **Terminal commands** — Auto-executed
-- ✅ **Retry prompts** — Auto-confirmed
-- ✅ **Stuck agents** — Auto-recovered
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Alt+Shift+U` | Toggle Auto-Accept ON/OFF |
+| `Cmd+Alt+Shift+U` (Mac) | Toggle Auto-Accept ON/OFF |
 
----
+## 📖 Usage
 
-## Features
+1. Install the extension
+2. Restart Antigravity IDE  
+3. The extension activates automatically (✅ Auto-Accept: ON)
+4. Launch an Agent task and sit back!
 
-### Background Mode (Pro)
-Run multiple Antigravity tabs simultaneously. Every conversation auto-accepts in the background — no tab-switching required.
+The status bar shows the current state:
+- `✅ Auto Accept: ON` - All agent steps are being auto-accepted
+- `🛑 Auto Accept: OFF` - Manual approval required
 
-### Dangerous Command Blocking
-Built-in protection against destructive commands like `rm -rf /`. Pro users can customize the blocklist.
+## 🛡️ Safety Features
 
-### Real-time Status Overlay
-Visual indicators show conversation state:
-- **Purple** — In progress, actively polling
-- **Green** — Task completed
+The extension blocks dangerous commands by default:
+- `rm -rf /`, `rm -rf ~`, `rm -rf *`
+- `format c:`, `del /f /s /q`
+- Fork bombs and disk operations
+- And more...
 
-### Works Everywhere
-- ✅ Antigravity
-- ✅ Cursor
-- ✅ Multiple windows
-- ✅ Minimized/unfocused
+### Edit Banned Commands
+Use the Command Palette (`Ctrl+Shift+P`) and run:
+- `Auto Accept: Edit Banned Commands` - Customize blocked patterns
+- `Auto Accept: Reset Banned Commands` - Restore defaults
 
----
+Patterns support:
+- **Plain text**: `rm -rf /` (case-insensitive substring match)
+- **Regex**: `/sudo\s+rm/i` (regular expression)
 
-## Quick Start
+## 🔧 Requirements
 
-1. **Install** the extension
-2. **Relaunch** when prompted (one-click)
-3. **Done** — Auto Accept activates automatically
+- Antigravity IDE (VS Code based)
 
-The extension runs silently. Check the status bar for `Auto Accept: ON`.
+## ❓ FAQ
 
----
+**Q: Is this safe to use?**  
+A: The extension only accepts steps that Antigravity Agent proposes. It blocks dangerous commands automatically. Review agent behavior periodically.
 
-## Pro Features
+**Q: Can I pause it temporarily?**  
+A: Yes! Click the status bar item or press `Ctrl+Alt+Shift+U`.
 
-| Feature | Free | Pro |
-|---------|------|-----|
-| Auto-accept in active tab | ✅ | ✅ |
-| Background mode (all tabs) | — | ✅ |
-| Custom banned commands | — | ✅ |
-| Adjustable polling speed | — | ✅ |
-| Stuck agent recovery | — | ✅ |
-| Multi-window support | — | ✅ |
+**Q: Does it work when the window is minimized?**  
+A: Yes! It uses native Antigravity commands that work in the background.
 
+**Q: Does it phone home or track me?**  
+A: No! Zero network calls, zero telemetry. Everything stays local.
 
----
+## 📜 License
 
-## Requirements
+MIT - See [LICENSE](LICENSE.md) for details.
 
-- Antigravity or Cursor IDE
-- One-time relaunch after install
+## ⭐ Credits
 
----
-
-## License
-
-MIT
+Inspired by [pesoszpesosz/antigravity-auto-accept](https://github.com/pesoszpesosz/antigravity-auto-accept) with added safety features.
