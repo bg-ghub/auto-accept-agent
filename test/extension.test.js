@@ -101,8 +101,8 @@ const DEFAULT_CONFIG = {
     acceptSuggestions: true,
     acceptEditBlocks: true,
     acceptFileAccess: true,
-    autoContinue: false,
-    acceptAll: false,
+    autoContinue: true,
+    acceptAll: true,
     autoRetryOnError: true,
     autoRetryDelay: 1000,
     maxRetryAttempts: 3,
@@ -356,12 +356,12 @@ describe('Configuration Defaults', () => {
         assert.strictEqual(DEFAULT_CONFIG.acceptFileAccess, true);
     });
 
-    test('autoContinue should default to false', () => {
-        assert.strictEqual(DEFAULT_CONFIG.autoContinue, false);
+    test('autoContinue should default to true', () => {
+        assert.strictEqual(DEFAULT_CONFIG.autoContinue, true);
     });
 
-    test('acceptAll should default to false', () => {
-        assert.strictEqual(DEFAULT_CONFIG.acceptAll, false);
+    test('acceptAll should default to true', () => {
+        assert.strictEqual(DEFAULT_CONFIG.acceptAll, true);
     });
 
     test('autoRetryOnError should default to true', () => {

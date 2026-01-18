@@ -89,12 +89,12 @@
                 },
                 "auto-accept.autoContinue": {
                     "type": "boolean",
-                    "default": false,
+                    "default": true,
                     "description": "Auto-send 'continue' when agent is waiting for user input"
                 },
                 "auto-accept.acceptAll": {
                     "type": "boolean",
-                    "default": false,
+                    "default": true,
                     "description": "Auto-accept all file changes at once (Accept All button)"
                 },
                 "auto-accept.autoRetryOnError": {
