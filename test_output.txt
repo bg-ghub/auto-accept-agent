@@ -1,0 +1,92 @@
+============================================================
+AUTO-ACCEPT AGENT - TEST SUITE
+============================================================
+
+­ƒôª Banned Commands - Plain Text Patterns
+  Ô£à should block exact match "rm -rf /"
+  Ô£à should block command containing "rm -rf /"
+  Ô£à should block case-insensitive "FORMAT C:"
+  Ô£à should allow safe command "ls -la"
+  Ô£à should allow safe command "npm install"
+  Ô£à should allow safe command "git push"
+  Ô£à should handle empty command
+  Ô£à should handle null command
+  Ô£à should handle undefined command
+
+­ƒôª Banned Commands - Regex Patterns
+  Ô£à should block "sudo rm -rf" with regex
+  Ô£à should block "sudo  rm" with multiple spaces
+  Ô£à should block "SUDO RM" case-insensitive
+  Ô£à should block "chmod -R 777" with regex
+  Ô£à should allow "sudo apt install"
+  Ô£à should allow "chmod 755"
+  Ô£à should allow "chmod -R 755"
+
+­ƒôª Banned Commands - Edge Cases
+  Ô£à should handle empty banned list
+  Ô£à should handle banned list with empty strings
+  ÔØî should handle invalid regex gracefully
+     Error: Expected values to be strictly equal:
+
+false !== true
+
+  Ô£à should handle special characters in plain text
+  Ô£à should handle fork bomb pattern
+  Ô£à should handle dd command pattern
+
+­ƒôª Banned Commands - Default Patterns
+  Ô£à should block "rm -rf /"
+  Ô£à should block "rm -rf ~"
+  Ô£à should block "format c:"
+  Ô£à should block "del /f /s /q"
+  Ô£à should block "shutdown"
+  Ô£à should block "reboot"
+  Ô£à should block "sudo rm -rf"
+  Ô£à should block "mkfs."
+
+­ƒôª Session Duration Formatting
+  Ô£à should return "N/A" for null start time
+  Ô£à should return "N/A" for undefined start time
+  Ô£à should return "0m" for current time
+  Ô£à should format 5 minutes correctly
+  Ô£à should format 30 minutes correctly
+  Ô£à should format 1 hour correctly
+  Ô£à should format hours and minutes correctly
+
+­ƒôª Configuration Defaults
+  Ô£à enabled should default to true
+  Ô£à pollingInterval should default to 500
+  Ô£à pollingInterval should be within valid range
+  Ô£à showActivityCounter should default to true
+  Ô£à autoRetryOnError should default to true
+  Ô£à autoRetryDelay should default to 1000
+  Ô£à autoRetryDelay should be within valid range
+  Ô£à maxRetryAttempts should default to 3
+  Ô£à maxRetryAttempts should be within valid range
+  Ô£à bannedCommands should have default patterns
+
+­ƒôª Antigravity Commands
+  Ô£à should have acceptAgentStep command
+  Ô£à should have terminal.accept command
+  Ô£à should have acceptSuggestion command
+  Ô£à should have acceptEditBlock command
+  Ô£à should have retryAgentStep command for auto-retry
+  Ô£à all commands should have correct prefix
+  Ô£à should have at least 5 commands
+
+­ƒôª Extension Commands (package.json)
+  Ô£à should have toggle command
+  Ô£à should have editBannedCommands command
+  Ô£à should have resetBannedCommands command
+  Ô£à should have resetCounter command
+  Ô£à should have showStats command
+  Ô£à all commands should have correct prefix
+
+============================================================
+TEST RESULTS
+============================================================
+
+­ƒôè Summary: 59 passed, 1 failed
+   Total: 60 tests
+
+ÔØî Some tests failed!

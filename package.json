@@ -2,7 +2,7 @@
     "name": "auto-accept-agent",
     "displayName": "Auto Accept Agent",
     "description": "Automatically accepts Antigravity agent steps. Simple, safe, and private - no tracking, no network calls.",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "publisher": "bg-ghub",
     "icon": "media/icon.png",
     "repository": {
@@ -38,6 +38,14 @@
             {
                 "command": "auto-accept.resetBannedCommands",
                 "title": "Auto Accept: Reset Banned Commands"
+            },
+            {
+                "command": "auto-accept.resetCounter",
+                "title": "Auto Accept: Reset Activity Counter"
+            },
+            {
+                "command": "auto-accept.showStats",
+                "title": "Auto Accept: Show Statistics"
             }
         ],
         "keybindings": [
@@ -46,6 +54,70 @@
                 "key": "ctrl+alt+shift+u",
                 "mac": "cmd+alt+shift+u"
             }
-        ]
+        ],
+        "configuration": {
+            "title": "Auto Accept Agent",
+            "properties": {
+                "auto-accept.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable or disable auto-accept functionality"
+                },
+                "auto-accept.pollingInterval": {
+                    "type": "number",
+                    "default": 500,
+                    "minimum": 100,
+                    "maximum": 5000,
+                    "description": "Polling interval in milliseconds (100-5000)"
+                },
+                "auto-accept.showActivityCounter": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Show activity counter in status bar"
+                },
+                "auto-accept.autoRetryOnError": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Automatically retry when agent execution terminates with error"
+                },
+                "auto-accept.autoRetryDelay": {
+                    "type": "number",
+                    "default": 1000,
+                    "minimum": 500,
+                    "maximum": 10000,
+                    "description": "Delay before auto-retry in milliseconds"
+                },
+                "auto-accept.maxRetryAttempts": {
+                    "type": "number",
+                    "default": 3,
+                    "minimum": 1,
+                    "maximum": 10,
+                    "description": "Maximum consecutive retry attempts before stopping"
+                },
+                "auto-accept.bannedCommands": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [
+                        "rm -rf /",
+                        "rm -rf ~",
+                        "rm -rf *",
+                        "format c:",
+                        "del /f /s /q",
+                        "rmdir /s /q",
+                        ":(){:|:&};:",
+                        "dd if=",
+                        "mkfs.",
+                        "> /dev/sda",
+                        "chmod -R 777 /",
+                        "sudo rm -rf",
+                        "shutdown",
+                        "reboot"
+                    ],
+                    "description": "List of dangerous command patterns to block (supports regex with /pattern/ syntax)"
+                }
+            }
+        }
     }
 }

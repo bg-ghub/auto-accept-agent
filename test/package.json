@@ -1,0 +1,9 @@
+{
+    "name": "auto-accept-agent-test",
+    "version": "1.0.0",
+    "description": "Test runner for auto-accept-agent",
+    "scripts": {
+        "test": "node test/extension.test.js"
+    },
+    "devDependencies": {}
+}
