@@ -15,7 +15,7 @@ Automatically accepts Antigravity agent steps without limits. No tracking, no ne
 ## 🚀 Installation
 
 ### Option 1: Install from VSIX
-1. Download the latest `.vsix` file from [Releases](https://github.com/MunKhin/auto-accept-agent/releases)
+1. Download the latest `.vsix` file from [Releases](https://github.com/bg-ghub/auto-accept-agent/releases)
 2. Open Antigravity IDE
 3. Go to Extensions → Click `...` menu → Install from VSIX...
 4. Select the downloaded `.vsix` file
@@ -23,7 +23,7 @@ Automatically accepts Antigravity agent steps without limits. No tracking, no ne
 
 ### Option 2: Build from Source
 ```bash
-git clone https://github.com/MunKhin/auto-accept-agent.git
+git clone https://github.com/bg-ghub/auto-accept-agent.git
 cd auto-accept-agent
 npm install -g @vscode/vsce
 vsce package
@@ -83,10 +83,6 @@ A: Yes! It uses native Antigravity commands that work in the background.
 **Q: Does it phone home or track me?**  
 A: No! Zero network calls, zero telemetry. Everything stays local.
 
-## 📜 License
+## ⭐ Support
 
-MIT - See [LICENSE](LICENSE.md) for details.
-
-## ⭐ Credits
-
-Inspired by [pesoszpesosz/antigravity-auto-accept](https://github.com/pesoszpesosz/antigravity-auto-accept) with added safety features.
+If you find this useful, consider giving it a star on GitHub!

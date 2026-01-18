@@ -3,11 +3,11 @@
     "displayName": "Auto Accept Agent",
     "description": "Automatically accepts Antigravity agent steps. Simple, safe, and private - no tracking, no network calls.",
     "version": "1.0.0",
-    "publisher": "MunKhin",
+    "publisher": "bg-ghub",
     "icon": "media/icon.png",
     "repository": {
         "type": "git",
-        "url": "https://github.com/MunKhin/auto-accept-agent"
+        "url": "https://github.com/bg-ghub/auto-accept-agent"
     },
     "categories": [
         "Other"

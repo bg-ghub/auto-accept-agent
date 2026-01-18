@@ -2,7 +2,6 @@ const vscode = require('vscode');
 
 // ============================================================
 // AUTO-ACCEPT EXTENSION - Clean & Simple Edition
-// Based on pesoszpesosz's simple approach + MunKhin's safety features
 // 
 // Features:
 // - Uses native Antigravity commands (no CDP required)
@@ -168,7 +167,7 @@ function isCommandBanned(commandText) {
                 const regexPattern = pattern.substring(1, lastSlash);
                 const flags = pattern.substring(lastSlash + 1) || 'i';
                 const regex = new RegExp(regexPattern, flags);
-                
+
                 if (regex.test(commandText)) {
                     log(`BLOCKED by regex: ${pattern}`);
                     return true;
