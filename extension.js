@@ -156,37 +156,60 @@ function startLoop() {
     autoAcceptInterval = setInterval(async () => {
         if (!enabled) return;
 
-        // Build list of commands based on settings
-        const commands = [];
+        // VERIFIED COMMANDS from Antigravity command discovery
+        // Each group: try commands in order, stop at first success
+        const commandGroups = [];
 
         if (getConfig('acceptAgentSteps')) {
-            commands.push('antigravity.agent.acceptAgentStep');
+            commandGroups.push([
+                'antigravity.agent.acceptAgentStep',
+                'antigravity.prioritized.agentAcceptFocusedHunk'
+            ]);
         }
         if (getConfig('acceptTerminalCommands')) {
-            commands.push('antigravity.terminal.accept');
+            commandGroups.push([
+                'antigravity.terminalCommand.accept',
+                'antigravity.prioritized.terminalSuggestion.accept'
+            ]);
         }
         if (getConfig('acceptSuggestions')) {
-            commands.push('antigravity.acceptSuggestion');
+            commandGroups.push([
+                'antigravity.acceptCompletion',
+                'antigravity.prioritized.supercompleteAccept'
+            ]);
         }
         if (getConfig('acceptEditBlocks')) {
-            commands.push('antigravity.agent.acceptEditBlock');
+            commandGroups.push([
+                'antigravity.command.accept',
+                'chatEditor.action.acceptHunk',
+                'inlineChat.acceptChanges'
+            ]);
         }
         if (getConfig('acceptFileAccess')) {
-            commands.push('antigravity.allowThisConversation');
+            // No direct command found - may be handled by acceptAgentStep
         }
         if (getConfig('autoContinue')) {
-            commands.push('antigravity.agent.continueTask');
+            commandGroups.push([
+                'workbench.action.focusAgentManager.continueConversation'
+            ]);
         }
         if (getConfig('acceptAll')) {
-            commands.push('antigravity.acceptAll');
+            commandGroups.push([
+                'antigravity.prioritized.agentAcceptAllInFile',
+                'chatEditor.action.acceptAllEdits',
+                'chatEditing.acceptAllFiles'
+            ]);
         }
 
-        for (const cmd of commands) {
-            try {
-                await vscode.commands.executeCommand(cmd);
-                consecutiveRetries = 0; // Reset retry counter on success
-            } catch (e) {
-                // Command may not exist or no pending action - this is normal
+        // Execute each command group
+        for (const cmdGroup of commandGroups) {
+            for (const cmd of cmdGroup) {
+                try {
+                    await vscode.commands.executeCommand(cmd);
+                    break; // Success - move to next group
+                } catch (e) {
+                    // Try next command in group
+                }
             }
         }
 
@@ -199,54 +222,41 @@ function startLoop() {
 
 /**
  * Check for error state and auto-retry if enabled
+ * Note: The retry command succeeds silently even when no error is present,
+ * so we use a longer delay to avoid spam and only log (no notifications)
  */
 async function checkAndRetry() {
     const autoRetryEnabled = getConfig('autoRetryOnError');
     if (!autoRetryEnabled) return;
 
     const maxRetries = getConfig('maxRetryAttempts') || 3;
-    const retryDelay = getConfig('autoRetryDelay') || 1000;
+    // Use a longer delay (default 5 seconds) since retry fires even when nothing to retry
+    const retryDelay = getConfig('autoRetryDelay') || 5000;
 
     // Don't retry too frequently
     const now = Date.now();
     if (now - lastRetryTime < retryDelay) return;
 
-    // Try multiple possible retry command names
-    const retryCommands = [
-        'antigravity.agent.retryAgentStep',
-        'antigravity.retry',
-        'antigravity.agent.retry',
-        'antigravity.retryLastAction',
-        'antigravity.agent.retryTask',
-        'antigravity.retryTask',
-        'antigravity.agent.retryOnError'
-    ];
+    // Only use the confirmed working command
+    try {
+        await vscode.commands.executeCommand('workbench.action.chat.retry');
 
-    for (const cmd of retryCommands) {
-        try {
-            await vscode.commands.executeCommand(cmd);
+        lastRetryTime = now;
+        consecutiveRetries++;
 
-            lastRetryTime = now;
-            consecutiveRetries++;
+        log(`Auto-retry executed (attempt ${consecutiveRetries}/${maxRetries})`);
 
-            log(`Auto-retry executed via ${cmd} (attempt ${consecutiveRetries}/${maxRetries})`);
-
-            // Show notification on first retry
-            if (consecutiveRetries === 1) {
-                vscode.window.showInformationMessage('🔄 Auto-Retry: Retrying agent step...');
-            }
-
-            // Check if we've exceeded max retries
-            if (consecutiveRetries >= maxRetries) {
-                log(`Max retry attempts (${maxRetries}) reached, pausing auto-retry`);
-                vscode.window.showWarningMessage(`⚠️ Auto-Retry: Max attempts (${maxRetries}) reached. Manual intervention may be needed.`);
-                consecutiveRetries = 0;
-            }
-
-            return; // Exit after successful retry
-        } catch (e) {
-            // Command doesn't exist or failed - try next one
+        // Only warn when max retries reached
+        if (consecutiveRetries >= maxRetries) {
+            log(`Max retry attempts (${maxRetries}) reached`);
+            vscode.window.showWarningMessage(`⚠️ Auto-Retry: Max attempts (${maxRetries}) reached. Pausing for 30 seconds.`);
+            consecutiveRetries = 0;
+            // Add extra delay after max retries
+            lastRetryTime = now + 30000;
         }
+    } catch (e) {
+        // Command failed - no error dialog present, reset counter
+        consecutiveRetries = 0;
     }
 }
 
@@ -401,6 +411,16 @@ async function discoverAntigravityCommands() {
             cmd.toLowerCase().includes('continue')
         );
 
+        // Find chat-related commands (workbench.action.chat.*)
+        const chatCommands = allCommands.filter(cmd =>
+            cmd.toLowerCase().includes('chat')
+        );
+
+        // Find terminal-related commands
+        const terminalCommands = allCommands.filter(cmd =>
+            cmd.toLowerCase().includes('terminal')
+        );
+
         // Create output
         const output = [
             '=== ANTIGRAVITY COMMAND DISCOVERY ===',
@@ -414,7 +434,13 @@ async function discoverAntigravityCommands() {
             '--- CONTINUE COMMANDS ---',
             ...continueCommands.sort(),
             '',
-            '--- ALL ANTIGRAVITY/AGENT COMMANDS ---',
+            '--- CHAT COMMANDS (workbench.action.chat.*) ---',
+            ...chatCommands.sort(),
+            '',
+            '--- TERMINAL COMMANDS ---',
+            ...terminalCommands.sort(),
+            '',
+            '--- ALL ANTIGRAVITY/AGENT/GEMINI COMMANDS ---',
             ...antigravityCommands.sort()
         ].join('\n');
 
@@ -424,15 +450,13 @@ async function discoverAntigravityCommands() {
         outputChannel.appendLine(output);
         outputChannel.show();
 
-        // Also copy retry commands to clipboard for easy use
-        if (retryCommands.length > 0) {
-            await vscode.env.clipboard.writeText(retryCommands.join('\n'));
-            vscode.window.showInformationMessage(`Found ${retryCommands.length} retry commands. Copied to clipboard. See Output panel for full list.`);
-        } else {
-            vscode.window.showWarningMessage('No retry commands found. See Output panel for all Antigravity commands.');
-        }
+        // Copy FULL output to clipboard
+        await vscode.env.clipboard.writeText(output);
+        vscode.window.showInformationMessage(
+            `Found ${retryCommands.length} retry, ${acceptCommands.length} accept, ${continueCommands.length} continue, ${chatCommands.length} chat commands. FULL LIST copied to clipboard!`
+        );
 
-        log(`Discovered ${antigravityCommands.length} Antigravity commands, ${retryCommands.length} retry commands`);
+        log(`Discovered commands - copied full list to clipboard`);
     } catch (e) {
         vscode.window.showErrorMessage(`Error discovering commands: ${e.message}`);
         log(`Error discovering commands: ${e.message}`);
