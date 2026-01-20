@@ -58,7 +58,8 @@ function activate(context) {
         vscode.commands.registerCommand('auto-accept.toggle', () => toggleAutoAccept()),
         vscode.commands.registerCommand('auto-accept.editBannedCommands', () => editBannedCommands()),
         vscode.commands.registerCommand('auto-accept.resetBannedCommands', () => resetBannedCommands()),
-        vscode.commands.registerCommand('auto-accept.discoverCommands', () => discoverAntigravityCommands())
+        vscode.commands.registerCommand('auto-accept.discoverCommands', () => discoverAntigravityCommands()),
+        vscode.commands.registerCommand('auto-accept.openQuickSettings', () => openQuickSettings())
     );
 
     // Listen for configuration changes
@@ -378,6 +379,74 @@ async function resetBannedCommands() {
 
         vscode.window.showInformationMessage('Banned commands reset to defaults.');
         log('Banned commands reset to defaults');
+    }
+}
+
+/**
+ * Open Quick Settings menu to toggle all auto-accept options
+ */
+async function openQuickSettings() {
+    const config = vscode.workspace.getConfiguration('auto-accept');
+
+    // Define all settings with their current values
+    const settings = [
+        { key: 'enabled', label: 'Master Toggle', description: 'Enable/disable all auto-accept' },
+        { key: 'acceptAgentSteps', label: 'Agent Steps', description: 'Auto-accept agent tool calls and file edits' },
+        { key: 'acceptTerminalCommands', label: 'Terminal Commands', description: 'Auto-accept terminal/shell commands' },
+        { key: 'acceptSuggestions', label: 'Code Suggestions', description: 'Auto-accept inline code suggestions' },
+        { key: 'acceptEditBlocks', label: 'Edit Blocks', description: 'Auto-accept code edit blocks' },
+        { key: 'acceptFileAccess', label: 'File Access', description: 'Auto-accept file access dialogs' },
+        { key: 'autoContinue', label: 'Auto Continue', description: 'Auto-send continue when agent waits' },
+        { key: 'acceptAll', label: 'Accept All', description: 'Auto-accept all file changes at once' },
+        { key: 'autoRetryOnError', label: 'Auto Retry', description: 'Auto-retry when agent errors occur' }
+    ];
+
+    // Build Quick Pick items
+    const items = settings.map(s => {
+        const currentValue = config.get(s.key);
+        const icon = currentValue ? '$(check)' : '$(circle-slash)';
+        const status = currentValue ? 'ON' : 'OFF';
+        return {
+            label: `${icon} ${s.label}: ${status}`,
+            description: s.description,
+            key: s.key,
+            currentValue: currentValue
+        };
+    });
+
+    // Add separator and bulk actions
+    items.push(
+        { label: '', kind: vscode.QuickPickItemKind.Separator },
+        { label: '$(check-all) Enable ALL', description: 'Turn on all auto-accept options', action: 'enableAll' },
+        { label: '$(circle-slash) Disable ALL', description: 'Turn off all auto-accept options', action: 'disableAll' }
+    );
+
+    const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Toggle Auto-Accept Settings',
+        title: 'Auto Accept Agent - Quick Settings'
+    });
+
+    if (!selected) return;
+
+    if (selected.action === 'enableAll') {
+        for (const s of settings) {
+            await config.update(s.key, true, vscode.ConfigurationTarget.Global);
+        }
+        vscode.window.showInformationMessage('✅ All auto-accept options ENABLED');
+        log('All settings enabled');
+    } else if (selected.action === 'disableAll') {
+        for (const s of settings) {
+            await config.update(s.key, false, vscode.ConfigurationTarget.Global);
+        }
+        vscode.window.showInformationMessage('🛑 All auto-accept options DISABLED');
+        log('All settings disabled');
+    } else if (selected.key) {
+        // Toggle the selected setting
+        const newValue = !selected.currentValue;
+        await config.update(selected.key, newValue, vscode.ConfigurationTarget.Global);
+        const status = newValue ? 'ON' : 'OFF';
+        vscode.window.showInformationMessage(`${selected.label.split(':')[0]}: ${status}`);
+        log(`${selected.key} set to ${newValue}`);
     }
 }
 
