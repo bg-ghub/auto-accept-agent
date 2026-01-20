@@ -56,6 +56,14 @@ function activate(context) {
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('auto-accept.toggle', () => toggleAutoAccept()),
+        vscode.commands.registerCommand('auto-accept.toggleAgentSteps', () => toggleSetting('acceptAgentSteps', 'Agent Steps')),
+        vscode.commands.registerCommand('auto-accept.toggleTerminalCommands', () => toggleSetting('acceptTerminalCommands', 'Terminal Commands')),
+        vscode.commands.registerCommand('auto-accept.toggleSuggestions', () => toggleSetting('acceptSuggestions', 'Suggestions')),
+        vscode.commands.registerCommand('auto-accept.toggleEditBlocks', () => toggleSetting('acceptEditBlocks', 'Edit Blocks')),
+        vscode.commands.registerCommand('auto-accept.toggleFileAccess', () => toggleSetting('acceptFileAccess', 'File Access')),
+        vscode.commands.registerCommand('auto-accept.toggleAutoContinue', () => toggleSetting('autoContinue', 'Auto-Continue')),
+        vscode.commands.registerCommand('auto-accept.toggleAcceptAll', () => toggleSetting('acceptAll', 'Accept All')),
+        vscode.commands.registerCommand('auto-accept.toggleAutoRetry', () => toggleSetting('autoRetryOnError', 'Auto-Retry')),
         vscode.commands.registerCommand('auto-accept.editBannedCommands', () => editBannedCommands()),
         vscode.commands.registerCommand('auto-accept.resetBannedCommands', () => resetBannedCommands()),
         vscode.commands.registerCommand('auto-accept.discoverCommands', () => discoverAntigravityCommands())
@@ -124,6 +132,21 @@ async function toggleAutoAccept() {
     }
 
     log(`Auto Accept toggled: ${enabled ? 'ON' : 'OFF'}`);
+}
+
+/**
+ * Toggle a specific setting on/off
+ */
+async function toggleSetting(settingKey, displayName) {
+    const config = vscode.workspace.getConfiguration('auto-accept');
+    const currentValue = config.get(settingKey);
+    const newValue = !currentValue;
+
+    await config.update(settingKey, newValue, vscode.ConfigurationTarget.Global);
+
+    const status = newValue ? '✅ ON' : '❌ OFF';
+    vscode.window.showInformationMessage(`Auto-Accept ${displayName}: ${status}`);
+    log(`${displayName} toggled: ${newValue ? 'ON' : 'OFF'}`);
 }
 
 /**
@@ -211,42 +234,29 @@ async function checkAndRetry() {
     const now = Date.now();
     if (now - lastRetryTime < retryDelay) return;
 
-    // Try multiple possible retry command names
-    const retryCommands = [
-        'antigravity.agent.retryAgentStep',
-        'antigravity.retry',
-        'antigravity.agent.retry',
-        'antigravity.retryLastAction',
-        'antigravity.agent.retryTask',
-        'antigravity.retryTask',
-        'antigravity.agent.retryOnError'
-    ];
+    // Check if there's an error state to retry
+    try {
+        // Try to execute retry command - if it succeeds, there was an error to retry
+        await vscode.commands.executeCommand('antigravity.agent.retryAgentStep');
 
-    for (const cmd of retryCommands) {
-        try {
-            await vscode.commands.executeCommand(cmd);
+        lastRetryTime = now;
+        consecutiveRetries++;
 
-            lastRetryTime = now;
-            consecutiveRetries++;
+        log(`Auto-retry executed (attempt ${consecutiveRetries}/${maxRetries})`);
 
-            log(`Auto-retry executed via ${cmd} (attempt ${consecutiveRetries}/${maxRetries})`);
-
-            // Show notification on first retry
-            if (consecutiveRetries === 1) {
-                vscode.window.showInformationMessage('🔄 Auto-Retry: Retrying agent step...');
-            }
-
-            // Check if we've exceeded max retries
-            if (consecutiveRetries >= maxRetries) {
-                log(`Max retry attempts (${maxRetries}) reached, pausing auto-retry`);
-                vscode.window.showWarningMessage(`⚠️ Auto-Retry: Max attempts (${maxRetries}) reached. Manual intervention may be needed.`);
-                consecutiveRetries = 0;
-            }
-
-            return; // Exit after successful retry
-        } catch (e) {
-            // Command doesn't exist or failed - try next one
+        // Show notification on first retry
+        if (consecutiveRetries === 1) {
+            vscode.window.showInformationMessage('🔄 Auto-Retry: Retrying agent step...');
         }
+
+        // Check if we've exceeded max retries
+        if (consecutiveRetries >= maxRetries) {
+            log(`Max retry attempts (${maxRetries}) reached, pausing auto-retry`);
+            vscode.window.showWarningMessage(`⚠️ Auto-Retry: Max attempts (${maxRetries}) reached. Manual intervention may be needed.`);
+            consecutiveRetries = 0; // Reset to allow future retries
+        }
+    } catch (e) {
+        // No error state or command doesn't exist - this is normal
     }
 }
 
@@ -372,71 +382,49 @@ async function resetBannedCommands() {
 }
 
 /**
- * Discover and display all available Antigravity commands
- * Useful for finding the correct retry command name
+ * Discover all available Antigravity commands
  */
 async function discoverAntigravityCommands() {
-    try {
-        const allCommands = await vscode.commands.getCommands(true);
+    log('Discovering Antigravity commands...');
 
-        // Filter for Antigravity commands
-        const antigravityCommands = allCommands.filter(cmd =>
-            cmd.toLowerCase().includes('antigravity') ||
-            cmd.toLowerCase().includes('gemini') ||
-            cmd.toLowerCase().includes('agent')
-        );
+    // Get all registered commands
+    const allCommands = await vscode.commands.getCommands(true);
 
-        // Find retry-related commands
-        const retryCommands = allCommands.filter(cmd =>
-            cmd.toLowerCase().includes('retry')
-        );
+    // Filter for antigravity commands
+    const antigravityCommands = allCommands.filter(cmd =>
+        cmd.toLowerCase().includes('antigravity') ||
+        cmd.toLowerCase().includes('agent') ||
+        cmd.toLowerCase().includes('accept') ||
+        cmd.toLowerCase().includes('continue') ||
+        cmd.toLowerCase().includes('retry')
+    ).sort();
 
-        // Find accept-related commands
-        const acceptCommands = allCommands.filter(cmd =>
-            cmd.toLowerCase().includes('accept')
-        );
+    // Log to console
+    log(`Found ${antigravityCommands.length} relevant commands:`);
+    antigravityCommands.forEach(cmd => log(`  - ${cmd}`));
 
-        // Find continue-related commands
-        const continueCommands = allCommands.filter(cmd =>
-            cmd.toLowerCase().includes('continue')
-        );
+    // Show in output channel
+    const output = vscode.window.createOutputChannel('Auto Accept - Commands');
+    output.clear();
+    output.appendLine('='.repeat(60));
+    output.appendLine('DISCOVERED COMMANDS (antigravity/agent/accept/continue/retry)');
+    output.appendLine('='.repeat(60));
+    output.appendLine('');
 
-        // Create output
-        const output = [
-            '=== ANTIGRAVITY COMMAND DISCOVERY ===',
-            '',
-            '--- RETRY COMMANDS ---',
-            ...retryCommands.sort(),
-            '',
-            '--- ACCEPT COMMANDS ---',
-            ...acceptCommands.sort(),
-            '',
-            '--- CONTINUE COMMANDS ---',
-            ...continueCommands.sort(),
-            '',
-            '--- ALL ANTIGRAVITY/AGENT COMMANDS ---',
-            ...antigravityCommands.sort()
-        ].join('\n');
+    antigravityCommands.forEach(cmd => {
+        output.appendLine(cmd);
+    });
 
-        // Show in output channel
-        const outputChannel = vscode.window.createOutputChannel('Auto Accept - Command Discovery');
-        outputChannel.clear();
-        outputChannel.appendLine(output);
-        outputChannel.show();
+    output.appendLine('');
+    output.appendLine('='.repeat(60));
+    output.appendLine(`Total: ${antigravityCommands.length} commands`);
+    output.appendLine('='.repeat(60));
 
-        // Also copy retry commands to clipboard for easy use
-        if (retryCommands.length > 0) {
-            await vscode.env.clipboard.writeText(retryCommands.join('\n'));
-            vscode.window.showInformationMessage(`Found ${retryCommands.length} retry commands. Copied to clipboard. See Output panel for full list.`);
-        } else {
-            vscode.window.showWarningMessage('No retry commands found. See Output panel for all Antigravity commands.');
-        }
+    output.show();
 
-        log(`Discovered ${antigravityCommands.length} Antigravity commands, ${retryCommands.length} retry commands`);
-    } catch (e) {
-        vscode.window.showErrorMessage(`Error discovering commands: ${e.message}`);
-        log(`Error discovering commands: ${e.message}`);
-    }
+    vscode.window.showInformationMessage(
+        `Found ${antigravityCommands.length} relevant commands. Check the Output panel.`
+    );
 }
 
 /**

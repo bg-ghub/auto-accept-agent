@@ -2,7 +2,7 @@
     "name": "auto-accept-agent",
     "displayName": "Auto Accept Agent",
     "description": "Automatically accepts Antigravity agent steps. Simple, safe, and private - no tracking, no network calls.",
-    "version": "1.2.1",
+    "version": "1.1.0",
     "publisher": "bg-ghub",
     "icon": "media/icon.png",
     "repository": {
@@ -32,6 +32,38 @@
                 "title": "Auto Accept: Toggle ON/OFF"
             },
             {
+                "command": "auto-accept.toggleAgentSteps",
+                "title": "Auto Accept: Toggle Agent Steps"
+            },
+            {
+                "command": "auto-accept.toggleTerminalCommands",
+                "title": "Auto Accept: Toggle Terminal Commands"
+            },
+            {
+                "command": "auto-accept.toggleSuggestions",
+                "title": "Auto Accept: Toggle Suggestions"
+            },
+            {
+                "command": "auto-accept.toggleEditBlocks",
+                "title": "Auto Accept: Toggle Edit Blocks"
+            },
+            {
+                "command": "auto-accept.toggleFileAccess",
+                "title": "Auto Accept: Toggle File Access"
+            },
+            {
+                "command": "auto-accept.toggleAutoContinue",
+                "title": "Auto Accept: Toggle Auto-Continue"
+            },
+            {
+                "command": "auto-accept.toggleAcceptAll",
+                "title": "Auto Accept: Toggle Accept All"
+            },
+            {
+                "command": "auto-accept.toggleAutoRetry",
+                "title": "Auto Accept: Toggle Auto-Retry"
+            },
+            {
                 "command": "auto-accept.editBannedCommands",
                 "title": "Auto Accept: Edit Banned Commands"
             },
@@ -41,7 +73,7 @@
             },
             {
                 "command": "auto-accept.discoverCommands",
-                "title": "Auto Accept: Discover Antigravity Commands"
+                "title": "Auto Accept: Discover Available Commands"
             }
         ],
         "keybindings": [
