@@ -21,6 +21,10 @@ let consecutiveRetries = 0;
 let lastRetryTime = 0;
 let retryTimeout = null;
 
+// Auto-continue state - track when accept commands last succeeded
+let lastAcceptSuccess = 0;
+let continueSentAt = 0;
+
 /**
  * Get configuration value with defaults
  */
@@ -190,9 +194,23 @@ function startLoop() {
             // No direct command found - may be handled by acceptAgentStep
         }
         if (getConfig('autoContinue')) {
-            commandGroups.push([
-                'workbench.action.focusAgentManager.continueConversation'
-            ]);
+            // Only send "continue" if:
+            // 1. No accept commands have succeeded for 5 seconds (agent is idle/waiting)
+            // 2. At least 30 seconds since last continue was sent
+            const now = Date.now();
+            const idleTime = now - lastAcceptSuccess;
+            const timeSinceContinue = now - continueSentAt;
+
+            if (idleTime > 5000 && timeSinceContinue > 30000) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.chat.open', { query: 'continue' });
+                    await vscode.commands.executeCommand('workbench.action.chat.submit');
+                    continueSentAt = now;
+                    log('AutoContinue: Sent "continue" to chat');
+                } catch (e) {
+                    // Ignore errors
+                }
+            }
         }
         if (getConfig('acceptAll')) {
             commandGroups.push([
@@ -202,16 +220,23 @@ function startLoop() {
             ]);
         }
 
-        // Execute each command group
+        // Execute each command group and track success
+        let anyAcceptSucceeded = false;
         for (const cmdGroup of commandGroups) {
             for (const cmd of cmdGroup) {
                 try {
                     await vscode.commands.executeCommand(cmd);
+                    anyAcceptSucceeded = true;
                     break; // Success - move to next group
                 } catch (e) {
                     // Try next command in group
                 }
             }
+        }
+
+        // Update last accept success time if any command worked
+        if (anyAcceptSucceeded) {
+            lastAcceptSuccess = Date.now();
         }
 
         // Check for auto-retry on error
