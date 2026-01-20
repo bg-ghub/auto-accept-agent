@@ -2,7 +2,7 @@
     "name": "auto-accept-agent",
     "displayName": "Auto Accept Agent",
     "description": "Automatically accepts Antigravity agent steps. Simple, safe, and private - no tracking, no network calls.",
-    "version": "1.3.1",
+    "version": "1.3.2",
     "publisher": "bg-ghub",
     "icon": "media/icon.png",
     "repository": {
@@ -112,15 +112,15 @@
                 },
                 "auto-accept.autoRetryOnError": {
                     "type": "boolean",
-                    "default": true,
-                    "description": "Automatically retry when agent execution terminates with error"
+                    "default": false,
+                    "description": "Automatically retry when agent errors (disabled by default - can be spammy)"
                 },
                 "auto-accept.autoRetryDelay": {
                     "type": "number",
-                    "default": 1000,
-                    "minimum": 500,
-                    "maximum": 10000,
-                    "description": "Delay before auto-retry in milliseconds"
+                    "default": 10000,
+                    "minimum": 5000,
+                    "maximum": 60000,
+                    "description": "Delay before auto-retry in milliseconds (10 seconds recommended)"
                 },
                 "auto-accept.maxRetryAttempts": {
                     "type": "number",

@@ -231,32 +231,29 @@ async function checkAndRetry() {
     if (!autoRetryEnabled) return;
 
     const maxRetries = getConfig('maxRetryAttempts') || 3;
-    // Use a longer delay (default 5 seconds) since retry fires even when nothing to retry
-    const retryDelay = getConfig('autoRetryDelay') || 5000;
+    // Use a longer delay (default 10 seconds) since retry fires even when nothing to retry
+    const retryDelay = getConfig('autoRetryDelay') || 10000;
 
     // Don't retry too frequently
     const now = Date.now();
     if (now - lastRetryTime < retryDelay) return;
 
     // Only use the confirmed working command
+    // Note: This command succeeds silently even when there's no error to retry
     try {
         await vscode.commands.executeCommand('workbench.action.chat.retry');
-
         lastRetryTime = now;
         consecutiveRetries++;
 
-        log(`Auto-retry executed (attempt ${consecutiveRetries}/${maxRetries})`);
+        // Only log, no notifications (too spammy since command always "succeeds")
+        log(`Auto-retry fired (attempt ${consecutiveRetries}/${maxRetries})`);
 
-        // Only warn when max retries reached
         if (consecutiveRetries >= maxRetries) {
-            log(`Max retry attempts (${maxRetries}) reached`);
-            vscode.window.showWarningMessage(`⚠️ Auto-Retry: Max attempts (${maxRetries}) reached. Pausing for 30 seconds.`);
+            log(`Max retry attempts (${maxRetries}) reached, pausing for 60 seconds`);
             consecutiveRetries = 0;
-            // Add extra delay after max retries
-            lastRetryTime = now + 30000;
+            lastRetryTime = now + 60000; // Extra 60 second delay
         }
     } catch (e) {
-        // Command failed - no error dialog present, reset counter
         consecutiveRetries = 0;
     }
 }
