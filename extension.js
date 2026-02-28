@@ -199,6 +199,17 @@ function startLoop() {
         // Accept commands - these should not steal focus
         const commandGroups = [];
 
+        // Run commands FIRST — must fire before acceptTerminalCommands
+        // which can consume dialog state via antigravity.terminalCommand.accept
+        if (getConfig('acceptRunCommands')) {
+            commandGroups.push([
+                'antigravity.terminalCommand.run',
+                'workbench.action.terminal.chat.runCommand',
+                'workbench.action.terminal.chat.runFirstCommand',
+                'notification.acceptPrimaryAction',
+                'quickInput.accept'
+            ]);
+        }
         if (getConfig('acceptAgentSteps')) {
             commandGroups.push([
                 'antigravity.agent.acceptAgentStep',
@@ -232,22 +243,17 @@ function startLoop() {
                 'chatEditing.acceptAllFiles'
             ]);
         }
-        if (getConfig('acceptRunCommands')) {
-            commandGroups.push([
-                'antigravity.terminalCommand.run',
-                'workbench.action.terminal.chat.runCommand',
-                'workbench.action.terminal.chat.runFirstCommand'
-            ]);
-        }
 
         // Execute accept commands
+        // NOTE: No break-on-success — Antigravity commands silently succeed
+        // even when no dialog is present, so breaking would prevent fallback
+        // commands from ever firing when the dialog actually appears.
         let anyAcceptSucceeded = false;
         for (const cmdGroup of commandGroups) {
             for (const cmd of cmdGroup) {
                 try {
                     await vscode.commands.executeCommand(cmd);
                     anyAcceptSucceeded = true;
-                    break;
                 } catch (e) { }
             }
         }
