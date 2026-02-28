@@ -1,5 +1,5 @@
 /**
- * Auto-Accept Agent Extension Test Suite (v1.6.3)
+ * Auto-Accept Agent Extension Test Suite (v1.6.4)
  * 
  * Tests core functionality without requiring VS Code runtime.
  * Run with: node test/extension.test.js
@@ -173,7 +173,7 @@ const EXTENSION_COMMANDS = [
 // ============================================================
 
 console.log('='.repeat(60));
-console.log('AUTO-ACCEPT AGENT - TEST SUITE (v1.6.3)');
+console.log('AUTO-ACCEPT AGENT - TEST SUITE (v1.6.4)');
 console.log('='.repeat(60));
 
 describe('Banned Commands - Plain Text Patterns', () => {
@@ -372,7 +372,7 @@ describe('Exponential Backoff', () => {
     });
 });
 
-describe('Configuration Defaults (v1.6.3)', () => {
+describe('Configuration Defaults (v1.6.4)', () => {
     test('enabled should default to true', () => {
         assert.strictEqual(DEFAULT_CONFIG.enabled, true);
     });
@@ -459,7 +459,7 @@ describe('Configuration Defaults (v1.6.3)', () => {
     });
 });
 
-describe('Command Groups (v1.6.3)', () => {
+describe('Command Groups (v1.6.4)', () => {
     test('acceptAgentSteps group should include acceptAgentStep', () => {
         assert.ok(COMMAND_GROUPS.acceptAgentSteps.includes('antigravity.agent.acceptAgentStep'));
     });
@@ -505,7 +505,7 @@ describe('Command Groups (v1.6.3)', () => {
     });
 });
 
-describe('Extension Commands (package.json v1.6.3)', () => {
+describe('Extension Commands (package.json v1.6.4)', () => {
     test('should have toggle command', () => {
         assert.ok(EXTENSION_COMMANDS.includes('auto-accept.toggle'));
     });

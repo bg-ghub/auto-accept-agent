@@ -214,7 +214,9 @@ function startLoop() {
             commandGroups.push([
                 'antigravity.agent.acceptAgentStep',
                 'antigravity.prioritized.agentAcceptFocusedHunk',
-                'workbench.action.chat.acceptTool'
+                'workbench.action.chat.acceptTool',
+                'notification.acceptPrimaryAction',
+                'quickInput.accept'
             ]);
         }
         if (getConfig('acceptTerminalCommands')) {
