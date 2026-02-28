@@ -214,9 +214,7 @@ function startLoop() {
             commandGroups.push([
                 'antigravity.agent.acceptAgentStep',
                 'antigravity.prioritized.agentAcceptFocusedHunk',
-                'workbench.action.chat.acceptTool',
-                'notification.acceptPrimaryAction',
-                'quickInput.accept'
+                'workbench.action.chat.acceptTool'
             ]);
         }
         if (getConfig('acceptTerminalCommands')) {
@@ -246,19 +244,16 @@ function startLoop() {
             ]);
         }
 
-        // Execute accept commands
-        // NOTE: No break-on-success — Antigravity commands silently succeed
-        // even when no dialog is present, so breaking would prevent fallback
-        // commands from ever firing when the dialog actually appears.
-        let anyAcceptSucceeded = false;
-        for (const cmdGroup of commandGroups) {
-            for (const cmd of cmdGroup) {
-                try {
-                    await vscode.commands.executeCommand(cmd);
-                    anyAcceptSucceeded = true;
-                } catch (e) { }
-            }
-        }
+        // Execute accept commands — ALL in parallel
+        // Commands fire simultaneously via Promise.allSettled to avoid
+        // sequential await bottleneck (18 commands × 20-50ms = 360-900ms).
+        // With 500ms polling, sequential execution caused timing gaps
+        // where dialogs appeared but the loop was busy awaiting no-ops.
+        const allCommands = commandGroups.flat();
+        const results = await Promise.allSettled(
+            allCommands.map(cmd => vscode.commands.executeCommand(cmd))
+        );
+        const anyAcceptSucceeded = results.some(r => r.status === 'fulfilled');
 
         if (anyAcceptSucceeded) {
             lastAcceptSuccess = Date.now();
