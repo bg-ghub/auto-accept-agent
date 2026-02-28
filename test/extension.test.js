@@ -1,5 +1,5 @@
 /**
- * Auto-Accept Agent Extension Test Suite (v1.6.6)
+ * Auto-Accept Agent Extension Test Suite (v1.6.7)
  * 
  * Tests core functionality without requiring VS Code runtime.
  * Run with: node test/extension.test.js
@@ -150,9 +150,7 @@ const COMMAND_GROUPS = {
     acceptRunCommands: [
         'antigravity.terminalCommand.run',
         'workbench.action.terminal.chat.runCommand',
-        'workbench.action.terminal.chat.runFirstCommand',
-        'notification.acceptPrimaryAction',
-        'quickInput.accept'
+        'workbench.action.terminal.chat.runFirstCommand'
     ],
     retry: [
         'workbench.action.chat.retry'
@@ -173,7 +171,7 @@ const EXTENSION_COMMANDS = [
 // ============================================================
 
 console.log('='.repeat(60));
-console.log('AUTO-ACCEPT AGENT - TEST SUITE (v1.6.6)');
+console.log('AUTO-ACCEPT AGENT - TEST SUITE (v1.6.7)');
 console.log('='.repeat(60));
 
 describe('Banned Commands - Plain Text Patterns', () => {
@@ -372,7 +370,7 @@ describe('Exponential Backoff', () => {
     });
 });
 
-describe('Configuration Defaults (v1.6.6)', () => {
+describe('Configuration Defaults (v1.6.7)', () => {
     test('enabled should default to true', () => {
         assert.strictEqual(DEFAULT_CONFIG.enabled, true);
     });
@@ -459,7 +457,7 @@ describe('Configuration Defaults (v1.6.6)', () => {
     });
 });
 
-describe('Command Groups (v1.6.6)', () => {
+describe('Command Groups (v1.6.7)', () => {
     test('acceptAgentSteps group should include acceptAgentStep', () => {
         assert.ok(COMMAND_GROUPS.acceptAgentSteps.includes('antigravity.agent.acceptAgentStep'));
     });
@@ -505,7 +503,7 @@ describe('Command Groups (v1.6.6)', () => {
     });
 });
 
-describe('Extension Commands (package.json v1.6.6)', () => {
+describe('Extension Commands (package.json v1.6.7)', () => {
     test('should have toggle command', () => {
         assert.ok(EXTENSION_COMMANDS.includes('auto-accept.toggle'));
     });

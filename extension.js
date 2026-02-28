@@ -205,9 +205,7 @@ function startLoop() {
             commandGroups.push([
                 'antigravity.terminalCommand.run',
                 'workbench.action.terminal.chat.runCommand',
-                'workbench.action.terminal.chat.runFirstCommand',
-                'notification.acceptPrimaryAction',
-                'quickInput.accept'
+                'workbench.action.terminal.chat.runFirstCommand'
             ]);
         }
         if (getConfig('acceptAgentSteps')) {
@@ -243,6 +241,15 @@ function startLoop() {
                 'chatEditing.acceptAllFiles'
             ]);
         }
+
+        // Catch-all: Always fire notification.acceptPrimaryAction
+        // This handles ALL notification-based approval dialogs:
+        // - "Run command?" → clicks Run
+        // - "Allow file access" → clicks "Allow This Conversation"
+        // - Tool access approvals → clicks primary allow action
+        commandGroups.push([
+            'notification.acceptPrimaryAction'
+        ]);
 
         // Execute accept commands — ALL in parallel
         // Commands fire simultaneously via Promise.allSettled to avoid
