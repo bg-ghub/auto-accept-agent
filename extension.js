@@ -232,6 +232,13 @@ function startLoop() {
                 'chatEditing.acceptAllFiles'
             ]);
         }
+        if (getConfig('acceptRunCommands')) {
+            commandGroups.push([
+                'antigravity.terminalCommand.run',
+                'workbench.action.terminal.chat.runCommand',
+                'workbench.action.terminal.chat.runFirstCommand'
+            ]);
+        }
 
         // Execute accept commands
         let anyAcceptSucceeded = false;
@@ -468,6 +475,7 @@ async function openQuickSettings() {
         { key: 'acceptSuggestions', label: 'Code Suggestions', description: 'Auto-accept inline code suggestions' },
         { key: 'acceptEditBlocks', label: 'Edit Blocks', description: 'Auto-accept code edit blocks' },
         { key: 'acceptAll', label: 'Accept All', description: 'Auto-accept all file changes at once' },
+        { key: 'acceptRunCommands', label: 'Run Commands', description: 'Auto-accept "Run command?" dialogs' },
         { key: 'autoRetryOnError', label: 'Auto Retry', description: 'Auto-retry with exponential backoff' },
         { key: 'jitterEnabled', label: 'Retry Jitter', description: 'Add randomization to retry timing' }
     ];

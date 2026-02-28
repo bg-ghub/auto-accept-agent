@@ -2,7 +2,7 @@
     "name": "auto-accept-agent",
     "displayName": "Auto Accept Agent",
     "description": "Automatically accepts Antigravity agent steps. Simple, safe, and private - no tracking, no network calls.",
-    "version": "1.6.0",
+    "version": "1.6.1",
     "publisher": "bg-ghub",
     "icon": "media/icon.png",
     "repository": {
@@ -99,6 +99,11 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Auto-accept all file changes at once (Accept All button)"
+                },
+                "auto-accept.acceptRunCommands": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Auto-accept 'Run command?' dialogs (run agent commands in terminal)"
                 },
                 "auto-accept.autoRetryOnError": {
                     "type": "boolean",

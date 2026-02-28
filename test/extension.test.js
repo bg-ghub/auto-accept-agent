@@ -1,5 +1,5 @@
 /**
- * Auto-Accept Agent Extension Test Suite (v1.6.0)
+ * Auto-Accept Agent Extension Test Suite (v1.6.1)
  * 
  * Tests core functionality without requiring VS Code runtime.
  * Run with: node test/extension.test.js
@@ -98,6 +98,7 @@ const DEFAULT_CONFIG = {
     acceptSuggestions: true,
     acceptEditBlocks: true,
     acceptAll: true,
+    acceptRunCommands: true,
     autoRetryOnError: false,
     retryBaseDelay: 1000,
     retryMaxDelay: 60000,
@@ -146,6 +147,11 @@ const COMMAND_GROUPS = {
         'chatEditor.action.acceptAllEdits',
         'chatEditing.acceptAllFiles'
     ],
+    acceptRunCommands: [
+        'antigravity.terminalCommand.run',
+        'workbench.action.terminal.chat.runCommand',
+        'workbench.action.terminal.chat.runFirstCommand'
+    ],
     retry: [
         'workbench.action.chat.retry'
     ]
@@ -165,7 +171,7 @@ const EXTENSION_COMMANDS = [
 // ============================================================
 
 console.log('='.repeat(60));
-console.log('AUTO-ACCEPT AGENT - TEST SUITE (v1.6.0)');
+console.log('AUTO-ACCEPT AGENT - TEST SUITE (v1.6.1)');
 console.log('='.repeat(60));
 
 describe('Banned Commands - Plain Text Patterns', () => {
@@ -364,7 +370,7 @@ describe('Exponential Backoff', () => {
     });
 });
 
-describe('Configuration Defaults (v1.6.0)', () => {
+describe('Configuration Defaults (v1.6.1)', () => {
     test('enabled should default to true', () => {
         assert.strictEqual(DEFAULT_CONFIG.enabled, true);
     });
@@ -396,6 +402,10 @@ describe('Configuration Defaults (v1.6.0)', () => {
 
     test('acceptAll should default to true', () => {
         assert.strictEqual(DEFAULT_CONFIG.acceptAll, true);
+    });
+
+    test('acceptRunCommands should default to true', () => {
+        assert.strictEqual(DEFAULT_CONFIG.acceptRunCommands, true);
     });
 
     test('autoRetryOnError should default to false', () => {
@@ -447,7 +457,7 @@ describe('Configuration Defaults (v1.6.0)', () => {
     });
 });
 
-describe('Command Groups (v1.6.0)', () => {
+describe('Command Groups (v1.6.1)', () => {
     test('acceptAgentSteps group should include acceptAgentStep', () => {
         assert.ok(COMMAND_GROUPS.acceptAgentSteps.includes('antigravity.agent.acceptAgentStep'));
     });
@@ -480,12 +490,20 @@ describe('Command Groups (v1.6.0)', () => {
         assert.deepStrictEqual(COMMAND_GROUPS.retry, ['workbench.action.chat.retry']);
     });
 
-    test('should have 6 command groups total', () => {
-        assert.strictEqual(Object.keys(COMMAND_GROUPS).length, 6);
+    test('acceptRunCommands group should include runCommand', () => {
+        assert.ok(COMMAND_GROUPS.acceptRunCommands.includes('workbench.action.terminal.chat.runCommand'));
+    });
+
+    test('acceptRunCommands group should include terminalCommand.run', () => {
+        assert.ok(COMMAND_GROUPS.acceptRunCommands.includes('antigravity.terminalCommand.run'));
+    });
+
+    test('should have 7 command groups total', () => {
+        assert.strictEqual(Object.keys(COMMAND_GROUPS).length, 7);
     });
 });
 
-describe('Extension Commands (package.json v1.6.0)', () => {
+describe('Extension Commands (package.json v1.6.1)', () => {
     test('should have toggle command', () => {
         assert.ok(EXTENSION_COMMANDS.includes('auto-accept.toggle'));
     });
