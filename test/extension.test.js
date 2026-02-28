@@ -1,5 +1,5 @@
 /**
- * Auto-Accept Agent Extension Test Suite
+ * Auto-Accept Agent Extension Test Suite (v1.6.0)
  * 
  * Tests core functionality without requiring VS Code runtime.
  * Run with: node test/extension.test.js
@@ -76,23 +76,20 @@ function isCommandBanned(commandText, bannedCommands) {
 }
 
 /**
- * Get formatted session duration
+ * Calculate exponential backoff delay with optional jitter
  * (Exact copy from extension.js)
  */
-function getSessionDuration(startTime) {
-    if (!startTime) return 'N/A';
-
-    const duration = Date.now() - startTime;
-    const hours = Math.floor(duration / (1000 * 60 * 60));
-    const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
-
-    if (hours > 0) {
-        return `${hours}h ${minutes}m`;
+function calculateBackoff(attempt, baseDelay = 1000, maxDelay = 60000, jitterEnabled = true) {
+    let delay = baseDelay * Math.pow(2, attempt);
+    delay = Math.min(delay, maxDelay);
+    if (jitterEnabled) {
+        const jitterFactor = 0.75 + Math.random() * 0.5; // 0.75 to 1.25
+        delay = delay * jitterFactor;
     }
-    return `${minutes}m`;
+    return Math.round(delay);
 }
 
-// Default configuration values (from package.json)
+// Default configuration values (from package.json v1.6.0)
 const DEFAULT_CONFIG = {
     enabled: true,
     pollingInterval: 500,
@@ -100,12 +97,12 @@ const DEFAULT_CONFIG = {
     acceptTerminalCommands: true,
     acceptSuggestions: true,
     acceptEditBlocks: true,
-    acceptFileAccess: true,
-    autoContinue: true,
     acceptAll: true,
-    autoRetryOnError: true,
-    autoRetryDelay: 1000,
-    maxRetryAttempts: 3,
+    autoRetryOnError: false,
+    retryBaseDelay: 1000,
+    retryMaxDelay: 60000,
+    jitterEnabled: true,
+    maxRetryAttempts: 5,
     bannedCommands: [
         'rm -rf /',
         'rm -rf ~',
@@ -124,16 +121,43 @@ const DEFAULT_CONFIG = {
     ]
 };
 
-// Antigravity commands used by the extension
-const ANTIGRAVITY_COMMANDS = [
-    'antigravity.agent.acceptAgentStep',
-    'antigravity.terminal.accept',
-    'antigravity.acceptSuggestion',
-    'antigravity.agent.acceptEditBlock',
-    'antigravity.allowThisConversation',
-    'antigravity.agent.continueTask',
-    'antigravity.acceptAll',
-    'antigravity.agent.retryAgentStep'
+// Command groups used by extension.js v1.6.0 (from startLoop)
+const COMMAND_GROUPS = {
+    acceptAgentSteps: [
+        'antigravity.agent.acceptAgentStep',
+        'antigravity.prioritized.agentAcceptFocusedHunk',
+        'workbench.action.chat.acceptTool'
+    ],
+    acceptTerminalCommands: [
+        'antigravity.terminalCommand.accept',
+        'antigravity.prioritized.terminalSuggestion.accept'
+    ],
+    acceptSuggestions: [
+        'antigravity.acceptCompletion',
+        'antigravity.prioritized.supercompleteAccept'
+    ],
+    acceptEditBlocks: [
+        'antigravity.command.accept',
+        'chatEditor.action.acceptHunk',
+        'inlineChat.acceptChanges'
+    ],
+    acceptAll: [
+        'antigravity.prioritized.agentAcceptAllInFile',
+        'chatEditor.action.acceptAllEdits',
+        'chatEditing.acceptAllFiles'
+    ],
+    retry: [
+        'workbench.action.chat.retry'
+    ]
+};
+
+// Extension commands registered in package.json v1.6.0
+const EXTENSION_COMMANDS = [
+    'auto-accept.toggle',
+    'auto-accept.editBannedCommands',
+    'auto-accept.resetBannedCommands',
+    'auto-accept.discoverCommands',
+    'auto-accept.openQuickSettings'
 ];
 
 // ============================================================
@@ -141,7 +165,7 @@ const ANTIGRAVITY_COMMANDS = [
 // ============================================================
 
 console.log('='.repeat(60));
-console.log('AUTO-ACCEPT AGENT - TEST SUITE');
+console.log('AUTO-ACCEPT AGENT - TEST SUITE (v1.6.0)');
 console.log('='.repeat(60));
 
 describe('Banned Commands - Plain Text Patterns', () => {
@@ -226,9 +250,7 @@ describe('Banned Commands - Edge Cases', () => {
     });
 
     test('should handle invalid regex gracefully', () => {
-        // Invalid regex should fall back to literal match of the FULL pattern
         const bannedCommands = ['/[invalid/'];
-        // The fallback matches the full pattern string "/[invalid/" as literal
         assert.strictEqual(isCommandBanned('/[invalid/', bannedCommands), true);
         assert.strictEqual(isCommandBanned('some other command', bannedCommands), false);
     });
@@ -283,46 +305,66 @@ describe('Banned Commands - Default Patterns', () => {
     });
 });
 
-describe('Session Duration Formatting', () => {
-    test('should return "N/A" for null start time', () => {
-        assert.strictEqual(getSessionDuration(null), 'N/A');
+describe('Exponential Backoff', () => {
+    test('attempt 0 should return base delay (no jitter)', () => {
+        const delay = calculateBackoff(0, 1000, 60000, false);
+        assert.strictEqual(delay, 1000);
     });
 
-    test('should return "N/A" for undefined start time', () => {
-        assert.strictEqual(getSessionDuration(undefined), 'N/A');
+    test('attempt 1 should double (no jitter)', () => {
+        const delay = calculateBackoff(1, 1000, 60000, false);
+        assert.strictEqual(delay, 2000);
     });
 
-    test('should return "0m" for current time', () => {
-        const result = getSessionDuration(Date.now());
-        assert.strictEqual(result, '0m');
+    test('attempt 2 should quadruple (no jitter)', () => {
+        const delay = calculateBackoff(2, 1000, 60000, false);
+        assert.strictEqual(delay, 4000);
     });
 
-    test('should format 5 minutes correctly', () => {
-        const fiveMinsAgo = Date.now() - (5 * 60 * 1000);
-        const result = getSessionDuration(fiveMinsAgo);
-        assert.strictEqual(result, '5m');
+    test('attempt 3 should 8x (no jitter)', () => {
+        const delay = calculateBackoff(3, 1000, 60000, false);
+        assert.strictEqual(delay, 8000);
     });
 
-    test('should format 30 minutes correctly', () => {
-        const thirtyMinsAgo = Date.now() - (30 * 60 * 1000);
-        const result = getSessionDuration(thirtyMinsAgo);
-        assert.strictEqual(result, '30m');
+    test('should respect max delay cap (no jitter)', () => {
+        const delay = calculateBackoff(10, 1000, 60000, false);
+        assert.strictEqual(delay, 60000);
     });
 
-    test('should format 1 hour correctly', () => {
-        const oneHourAgo = Date.now() - (60 * 60 * 1000);
-        const result = getSessionDuration(oneHourAgo);
-        assert.strictEqual(result, '1h 0m');
+    test('should use custom base delay (no jitter)', () => {
+        const delay = calculateBackoff(0, 500, 60000, false);
+        assert.strictEqual(delay, 500);
     });
 
-    test('should format hours and minutes correctly', () => {
-        const twoHoursAgo = Date.now() - (2 * 60 * 60 * 1000 + 15 * 60 * 1000);
-        const result = getSessionDuration(twoHoursAgo);
-        assert.strictEqual(result, '2h 15m');
+    test('should use custom max delay (no jitter)', () => {
+        const delay = calculateBackoff(10, 1000, 10000, false);
+        assert.strictEqual(delay, 10000);
+    });
+
+    test('jitter should keep delay within ±25% of base', () => {
+        // Run multiple times to test range
+        for (let i = 0; i < 50; i++) {
+            const delay = calculateBackoff(0, 1000, 60000, true);
+            assert.ok(delay >= 750, `Delay ${delay} should be >= 750`);
+            assert.ok(delay <= 1250, `Delay ${delay} should be <= 1250`);
+        }
+    });
+
+    test('jitter should keep capped delay within ±25% of max', () => {
+        for (let i = 0; i < 50; i++) {
+            const delay = calculateBackoff(10, 1000, 60000, true);
+            assert.ok(delay >= 45000, `Delay ${delay} should be >= 45000`);
+            assert.ok(delay <= 75000, `Delay ${delay} should be <= 75000`);
+        }
+    });
+
+    test('attempt 0 returns integer', () => {
+        const delay = calculateBackoff(0, 1000, 60000, true);
+        assert.strictEqual(delay, Math.round(delay));
     });
 });
 
-describe('Configuration Defaults', () => {
+describe('Configuration Defaults (v1.6.0)', () => {
     test('enabled should default to true', () => {
         assert.strictEqual(DEFAULT_CONFIG.enabled, true);
     });
@@ -331,7 +373,7 @@ describe('Configuration Defaults', () => {
         assert.strictEqual(DEFAULT_CONFIG.pollingInterval, 500);
     });
 
-    test('pollingInterval should be within valid range', () => {
+    test('pollingInterval should be within valid range (100-5000)', () => {
         assert.ok(DEFAULT_CONFIG.pollingInterval >= 100, 'Should be at least 100ms');
         assert.ok(DEFAULT_CONFIG.pollingInterval <= 5000, 'Should be at most 5000ms');
     });
@@ -352,123 +394,134 @@ describe('Configuration Defaults', () => {
         assert.strictEqual(DEFAULT_CONFIG.acceptEditBlocks, true);
     });
 
-    test('acceptFileAccess should default to true', () => {
-        assert.strictEqual(DEFAULT_CONFIG.acceptFileAccess, true);
-    });
-
-    test('autoContinue should default to true', () => {
-        assert.strictEqual(DEFAULT_CONFIG.autoContinue, true);
-    });
-
     test('acceptAll should default to true', () => {
         assert.strictEqual(DEFAULT_CONFIG.acceptAll, true);
     });
 
-    test('autoRetryOnError should default to true', () => {
-        assert.strictEqual(DEFAULT_CONFIG.autoRetryOnError, true);
+    test('autoRetryOnError should default to false', () => {
+        assert.strictEqual(DEFAULT_CONFIG.autoRetryOnError, false);
     });
 
-    test('autoRetryDelay should default to 1000', () => {
-        assert.strictEqual(DEFAULT_CONFIG.autoRetryDelay, 1000);
+    test('retryBaseDelay should default to 1000', () => {
+        assert.strictEqual(DEFAULT_CONFIG.retryBaseDelay, 1000);
     });
 
-    test('autoRetryDelay should be within valid range', () => {
-        assert.ok(DEFAULT_CONFIG.autoRetryDelay >= 500, 'Should be at least 500ms');
-        assert.ok(DEFAULT_CONFIG.autoRetryDelay <= 10000, 'Should be at most 10000ms');
+    test('retryBaseDelay should be within valid range (500-10000)', () => {
+        assert.ok(DEFAULT_CONFIG.retryBaseDelay >= 500, 'Should be at least 500ms');
+        assert.ok(DEFAULT_CONFIG.retryBaseDelay <= 10000, 'Should be at most 10000ms');
     });
 
-    test('maxRetryAttempts should default to 3', () => {
-        assert.strictEqual(DEFAULT_CONFIG.maxRetryAttempts, 3);
+    test('retryMaxDelay should default to 60000', () => {
+        assert.strictEqual(DEFAULT_CONFIG.retryMaxDelay, 60000);
     });
 
-    test('maxRetryAttempts should be within valid range', () => {
+    test('retryMaxDelay should be within valid range (5000-300000)', () => {
+        assert.ok(DEFAULT_CONFIG.retryMaxDelay >= 5000, 'Should be at least 5000ms');
+        assert.ok(DEFAULT_CONFIG.retryMaxDelay <= 300000, 'Should be at most 300000ms');
+    });
+
+    test('jitterEnabled should default to true', () => {
+        assert.strictEqual(DEFAULT_CONFIG.jitterEnabled, true);
+    });
+
+    test('maxRetryAttempts should default to 5', () => {
+        assert.strictEqual(DEFAULT_CONFIG.maxRetryAttempts, 5);
+    });
+
+    test('maxRetryAttempts should be within valid range (1-20)', () => {
         assert.ok(DEFAULT_CONFIG.maxRetryAttempts >= 1, 'Should be at least 1');
-        assert.ok(DEFAULT_CONFIG.maxRetryAttempts <= 10, 'Should be at most 10');
+        assert.ok(DEFAULT_CONFIG.maxRetryAttempts <= 20, 'Should be at most 20');
     });
 
     test('bannedCommands should have default patterns', () => {
         assert.ok(DEFAULT_CONFIG.bannedCommands.length > 0);
         assert.ok(DEFAULT_CONFIG.bannedCommands.includes('rm -rf /'));
     });
-});
 
-describe('Antigravity Commands', () => {
-    test('should have acceptAgentStep command', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.agent.acceptAgentStep'));
+    test('should NOT have retired acceptFileAccess setting', () => {
+        assert.strictEqual(DEFAULT_CONFIG.acceptFileAccess, undefined);
     });
 
-    test('should have terminal.accept command', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.terminal.accept'));
-    });
-
-    test('should have acceptSuggestion command', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.acceptSuggestion'));
-    });
-
-    test('should have acceptEditBlock command', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.agent.acceptEditBlock'));
-    });
-
-    test('should have allowThisConversation command for file access', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.allowThisConversation'));
-    });
-
-    test('should have continueTask command for auto-continue', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.agent.continueTask'));
-    });
-
-    test('should have acceptAll command for bulk changes', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.acceptAll'));
-    });
-
-    test('should have retryAgentStep command for auto-retry', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.includes('antigravity.agent.retryAgentStep'));
-    });
-
-    test('all commands should have correct prefix', () => {
-        ANTIGRAVITY_COMMANDS.forEach(cmd => {
-            assert.ok(cmd.startsWith('antigravity.'), `Command ${cmd} should start with antigravity.`);
-        });
-    });
-
-    test('should have at least 8 commands', () => {
-        assert.ok(ANTIGRAVITY_COMMANDS.length >= 8);
+    test('should NOT have retired autoContinue setting', () => {
+        assert.strictEqual(DEFAULT_CONFIG.autoContinue, undefined);
     });
 });
 
-describe('Extension Commands (package.json)', () => {
-    const extensionCommands = [
-        'auto-accept.toggle',
-        'auto-accept.editBannedCommands',
-        'auto-accept.resetBannedCommands',
-        'auto-accept.resetCounter',
-        'auto-accept.showStats'
-    ];
+describe('Command Groups (v1.6.0)', () => {
+    test('acceptAgentSteps group should include acceptAgentStep', () => {
+        assert.ok(COMMAND_GROUPS.acceptAgentSteps.includes('antigravity.agent.acceptAgentStep'));
+    });
 
+    test('acceptAgentSteps group should include acceptTool', () => {
+        assert.ok(COMMAND_GROUPS.acceptAgentSteps.includes('workbench.action.chat.acceptTool'));
+    });
+
+    test('acceptAgentSteps group should include agentAcceptFocusedHunk', () => {
+        assert.ok(COMMAND_GROUPS.acceptAgentSteps.includes('antigravity.prioritized.agentAcceptFocusedHunk'));
+    });
+
+    test('acceptTerminalCommands group should include terminalCommand.accept', () => {
+        assert.ok(COMMAND_GROUPS.acceptTerminalCommands.includes('antigravity.terminalCommand.accept'));
+    });
+
+    test('acceptSuggestions group should include acceptCompletion', () => {
+        assert.ok(COMMAND_GROUPS.acceptSuggestions.includes('antigravity.acceptCompletion'));
+    });
+
+    test('acceptEditBlocks group should include command.accept', () => {
+        assert.ok(COMMAND_GROUPS.acceptEditBlocks.includes('antigravity.command.accept'));
+    });
+
+    test('acceptAll group should include agentAcceptAllInFile', () => {
+        assert.ok(COMMAND_GROUPS.acceptAll.includes('antigravity.prioritized.agentAcceptAllInFile'));
+    });
+
+    test('retry group should use background-safe chat.retry only', () => {
+        assert.deepStrictEqual(COMMAND_GROUPS.retry, ['workbench.action.chat.retry']);
+    });
+
+    test('should have 6 command groups total', () => {
+        assert.strictEqual(Object.keys(COMMAND_GROUPS).length, 6);
+    });
+});
+
+describe('Extension Commands (package.json v1.6.0)', () => {
     test('should have toggle command', () => {
-        assert.ok(extensionCommands.includes('auto-accept.toggle'));
+        assert.ok(EXTENSION_COMMANDS.includes('auto-accept.toggle'));
     });
 
     test('should have editBannedCommands command', () => {
-        assert.ok(extensionCommands.includes('auto-accept.editBannedCommands'));
+        assert.ok(EXTENSION_COMMANDS.includes('auto-accept.editBannedCommands'));
     });
 
     test('should have resetBannedCommands command', () => {
-        assert.ok(extensionCommands.includes('auto-accept.resetBannedCommands'));
+        assert.ok(EXTENSION_COMMANDS.includes('auto-accept.resetBannedCommands'));
     });
 
-    test('should have resetCounter command', () => {
-        assert.ok(extensionCommands.includes('auto-accept.resetCounter'));
+    test('should have discoverCommands command', () => {
+        assert.ok(EXTENSION_COMMANDS.includes('auto-accept.discoverCommands'));
     });
 
-    test('should have showStats command', () => {
-        assert.ok(extensionCommands.includes('auto-accept.showStats'));
+    test('should have openQuickSettings command', () => {
+        assert.ok(EXTENSION_COMMANDS.includes('auto-accept.openQuickSettings'));
+    });
+
+    test('should NOT have retired resetCounter command', () => {
+        assert.ok(!EXTENSION_COMMANDS.includes('auto-accept.resetCounter'));
+    });
+
+    test('should NOT have retired showStats command', () => {
+        assert.ok(!EXTENSION_COMMANDS.includes('auto-accept.showStats'));
     });
 
     test('all commands should have correct prefix', () => {
-        extensionCommands.forEach(cmd => {
+        EXTENSION_COMMANDS.forEach(cmd => {
             assert.ok(cmd.startsWith('auto-accept.'), `Command ${cmd} should start with auto-accept.`);
         });
+    });
+
+    test('should have exactly 5 commands', () => {
+        assert.strictEqual(EXTENSION_COMMANDS.length, 5);
     });
 });
 

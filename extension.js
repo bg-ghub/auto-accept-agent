@@ -23,7 +23,9 @@ let retryTimeout = null;
 
 // Auto-continue state - track when accept commands last succeeded
 let lastAcceptSuccess = 0;
-let continueSentAt = 0;
+
+// User activity tracking - don't retry while user is actively working
+let lastUserActivity = Date.now();
 
 /**
  * Get configuration value with defaults
@@ -38,6 +40,30 @@ function getConfig(key) {
  */
 function log(message) {
     console.log(`[AutoAccept] ${message}`);
+}
+
+/**
+ * Calculate exponential backoff delay with optional jitter
+ * @param {number} attempt - Current retry attempt (0-indexed)
+ * @param {number} baseDelay - Base delay in ms (default 1000)
+ * @param {number} maxDelay - Maximum delay cap in ms (default 60000)
+ * @param {boolean} jitterEnabled - Add ±25% randomization
+ * @returns {number} Calculated delay in ms
+ */
+function calculateBackoff(attempt, baseDelay = 1000, maxDelay = 60000, jitterEnabled = true) {
+    // Exponential: baseDelay * 2^attempt
+    let delay = baseDelay * Math.pow(2, attempt);
+
+    // Cap at maximum
+    delay = Math.min(delay, maxDelay);
+
+    // Add jitter (±25%) to prevent thundering herd
+    if (jitterEnabled) {
+        const jitterFactor = 0.75 + Math.random() * 0.5; // 0.75 to 1.25
+        delay = delay * jitterFactor;
+    }
+
+    return Math.round(delay);
 }
 
 /**
@@ -74,6 +100,8 @@ function activate(context) {
             }
         })
     );
+
+    // User activity tracking removed - was causing focus issues in multi-window scenarios
 
     // Start the auto-accept loop if enabled
     if (enabled) {
@@ -156,19 +184,26 @@ function startLoop() {
         clearInterval(autoAcceptInterval);
     }
 
+    // Reset all timers to prevent immediate retry on toggle
+    const now = Date.now();
+    lastAcceptSuccess = now;
+    lastUserActivity = now;
+    lastRetryTime = now;
+    consecutiveRetries = 0;
+
     const pollingInterval = getConfig('pollingInterval') || 500;
 
     autoAcceptInterval = setInterval(async () => {
         if (!enabled) return;
 
-        // VERIFIED COMMANDS from Antigravity command discovery
-        // Each group: try commands in order, stop at first success
+        // Accept commands - these should not steal focus
         const commandGroups = [];
 
         if (getConfig('acceptAgentSteps')) {
             commandGroups.push([
                 'antigravity.agent.acceptAgentStep',
-                'antigravity.prioritized.agentAcceptFocusedHunk'
+                'antigravity.prioritized.agentAcceptFocusedHunk',
+                'workbench.action.chat.acceptTool'
             ]);
         }
         if (getConfig('acceptTerminalCommands')) {
@@ -190,28 +225,6 @@ function startLoop() {
                 'inlineChat.acceptChanges'
             ]);
         }
-        if (getConfig('acceptFileAccess')) {
-            // No direct command found - may be handled by acceptAgentStep
-        }
-        if (getConfig('autoContinue')) {
-            // Only send "continue" if:
-            // 1. No accept commands have succeeded for 5 seconds (agent is idle/waiting)
-            // 2. At least 30 seconds since last continue was sent
-            const now = Date.now();
-            const idleTime = now - lastAcceptSuccess;
-            const timeSinceContinue = now - continueSentAt;
-
-            if (idleTime > 5000 && timeSinceContinue > 30000) {
-                try {
-                    await vscode.commands.executeCommand('workbench.action.chat.open', { query: 'continue' });
-                    await vscode.commands.executeCommand('workbench.action.chat.submit');
-                    continueSentAt = now;
-                    log('AutoContinue: Sent "continue" to chat');
-                } catch (e) {
-                    // Ignore errors
-                }
-            }
-        }
         if (getConfig('acceptAll')) {
             commandGroups.push([
                 'antigravity.prioritized.agentAcceptAllInFile',
@@ -220,27 +233,35 @@ function startLoop() {
             ]);
         }
 
-        // Execute each command group and track success
+        // Execute accept commands
         let anyAcceptSucceeded = false;
         for (const cmdGroup of commandGroups) {
             for (const cmd of cmdGroup) {
                 try {
                     await vscode.commands.executeCommand(cmd);
                     anyAcceptSucceeded = true;
-                    break; // Success - move to next group
-                } catch (e) {
-                    // Try next command in group
-                }
+                    break;
+                } catch (e) { }
             }
         }
 
-        // Update last accept success time if any command worked
         if (anyAcceptSucceeded) {
             lastAcceptSuccess = Date.now();
         }
 
-        // Check for auto-retry on error
-        await checkAndRetry();
+        // Auto-retry: ONLY use non-focus-stealing command
+        if (getConfig('autoRetryOnError')) {
+            const now = Date.now();
+            const idleTime = now - lastAcceptSuccess;
+            const timeSinceRetry = now - lastRetryTime;
+
+            if (idleTime > 5000 && timeSinceRetry > 3000) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.chat.retry');
+                    lastRetryTime = now;
+                } catch (e) { }
+            }
+        }
     }, pollingInterval);
 
     log(`Auto-accept loop started (interval: ${pollingInterval}ms)`);
@@ -248,38 +269,67 @@ function startLoop() {
 
 /**
  * Check for error state and auto-retry if enabled
- * Note: The retry command succeeds silently even when no error is present,
- * so we use a longer delay to avoid spam and only log (no notifications)
+ * Tries to click the Retry button on the "Agent terminated due to error" dialog
+ * Uses exponential backoff with jitter for intelligent retry timing
  */
 async function checkAndRetry() {
     const autoRetryEnabled = getConfig('autoRetryOnError');
     if (!autoRetryEnabled) return;
 
-    const maxRetries = getConfig('maxRetryAttempts') || 3;
-    // Use a longer delay (default 10 seconds) since retry fires even when nothing to retry
-    const retryDelay = getConfig('autoRetryDelay') || 10000;
+    const maxRetries = getConfig('maxRetryAttempts') || 5;
+    const baseDelay = getConfig('retryBaseDelay') || 1000;
+    const maxDelay = getConfig('retryMaxDelay') || 60000;
+    const jitterEnabled = getConfig('jitterEnabled') !== false; // Default true
 
-    // Don't retry too frequently
     const now = Date.now();
-    if (now - lastRetryTime < retryDelay) return;
 
-    // Only use the confirmed working command
-    // Note: This command succeeds silently even when there's no error to retry
+    // Only retry if agent has been idle for at least 5 seconds
+    // This prevents focus stealing during normal work pauses
+    const agentIdleTime = now - lastAcceptSuccess;
+    if (agentIdleTime < 5000) {
+        consecutiveRetries = 0; // Reset counter if agent is active
+        return;
+    }
+
+    // Don't retry while user is actively working (typing, clicking)
+    // Wait until user has been inactive for at least 3 seconds
+    const userIdleTime = now - lastUserActivity;
+    if (userIdleTime < 3000) {
+        return; // User is active, don't steal focus
+    }
+
+    // Calculate dynamic delay based on retry count (exponential backoff)
+    const currentBackoff = calculateBackoff(consecutiveRetries, baseDelay, maxDelay, jitterEnabled);
+    const timeSinceLastRetry = now - lastRetryTime;
+
+    // Don't retry too frequently - respect exponential backoff
+    if (timeSinceLastRetry < currentBackoff) return;
+
+    // Only use the non-focus-stealing retry command
+    // Focus-based approaches were removed as they disrupt user work
     try {
         await vscode.commands.executeCommand('workbench.action.chat.retry');
-        lastRetryTime = now;
-        consecutiveRetries++;
-
-        // Only log, no notifications (too spammy since command always "succeeds")
-        log(`Auto-retry fired (attempt ${consecutiveRetries}/${maxRetries})`);
-
-        if (consecutiveRetries >= maxRetries) {
-            log(`Max retry attempts (${maxRetries}) reached, pausing for 60 seconds`);
-            consecutiveRetries = 0;
-            lastRetryTime = now + 60000; // Extra 60 second delay
-        }
     } catch (e) {
+        // Retry command may fail silently if no error dialog present
+    }
+
+    lastRetryTime = now;
+    consecutiveRetries++;
+
+    // Calculate what the next backoff will be for user feedback
+    const nextBackoff = calculateBackoff(consecutiveRetries, baseDelay, maxDelay, jitterEnabled);
+    log(`Auto-retry attempt ${consecutiveRetries}/${maxRetries} after ${Math.round(agentIdleTime / 1000)}s idle. Next retry in ~${Math.round(nextBackoff / 1000)}s`);
+
+    // Only show notification every 2nd attempt to reduce spam
+    if (consecutiveRetries % 2 === 1 || consecutiveRetries === 1) {
+        vscode.window.showInformationMessage(`🔄 Retry ${consecutiveRetries}/${maxRetries} - next in ~${Math.round(nextBackoff / 1000)}s`);
+    }
+
+    if (consecutiveRetries >= maxRetries) {
+        vscode.window.showWarningMessage(`Auto-retry: Max attempts (${maxRetries}) reached, cooling down...`);
+        log(`Max retry attempts (${maxRetries}) reached, entering cooldown`);
         consecutiveRetries = 0;
+        lastRetryTime = now + maxDelay; // Use maxDelay as cooldown period
     }
 }
 
@@ -319,20 +369,20 @@ function isCommandBanned(commandText) {
                 const regex = new RegExp(regexPattern, flags);
 
                 if (regex.test(commandText)) {
-                    log(`BLOCKED by regex: ${pattern}`);
+                    log(`BLOCKED by regex: ${pattern} `);
                     return true;
                 }
             } else {
                 // Plain text - literal substring match (case-insensitive)
                 if (lowerText.includes(pattern.toLowerCase())) {
-                    log(`BLOCKED by pattern: ${pattern}`);
+                    log(`BLOCKED by pattern: ${pattern} `);
                     return true;
                 }
             }
         } catch (e) {
             // Invalid regex, try literal match
             if (lowerText.includes(pattern.toLowerCase())) {
-                log(`BLOCKED by pattern (fallback): ${pattern}`);
+                log(`BLOCKED by pattern(fallback): ${pattern} `);
                 return true;
             }
         }
@@ -417,10 +467,9 @@ async function openQuickSettings() {
         { key: 'acceptTerminalCommands', label: 'Terminal Commands', description: 'Auto-accept terminal/shell commands' },
         { key: 'acceptSuggestions', label: 'Code Suggestions', description: 'Auto-accept inline code suggestions' },
         { key: 'acceptEditBlocks', label: 'Edit Blocks', description: 'Auto-accept code edit blocks' },
-        { key: 'acceptFileAccess', label: 'File Access', description: 'Auto-accept file access dialogs' },
-        { key: 'autoContinue', label: 'Auto Continue', description: 'Auto-send continue when agent waits' },
         { key: 'acceptAll', label: 'Accept All', description: 'Auto-accept all file changes at once' },
-        { key: 'autoRetryOnError', label: 'Auto Retry', description: 'Auto-retry when agent errors occur' }
+        { key: 'autoRetryOnError', label: 'Auto Retry', description: 'Auto-retry with exponential backoff' },
+        { key: 'jitterEnabled', label: 'Retry Jitter', description: 'Add randomization to retry timing' }
     ];
 
     // Build Quick Pick items
@@ -429,7 +478,7 @@ async function openQuickSettings() {
         const icon = currentValue ? '$(check)' : '$(circle-slash)';
         const status = currentValue ? 'ON' : 'OFF';
         return {
-            label: `${icon} ${s.label}: ${status}`,
+            label: `${icon} ${s.label}: ${status} `,
             description: s.description,
             key: s.key,
             currentValue: currentValue
@@ -467,8 +516,8 @@ async function openQuickSettings() {
         const newValue = !selected.currentValue;
         await config.update(selected.key, newValue, vscode.ConfigurationTarget.Global);
         const status = newValue ? 'ON' : 'OFF';
-        vscode.window.showInformationMessage(`${selected.label.split(':')[0]}: ${status}`);
-        log(`${selected.key} set to ${newValue}`);
+        vscode.window.showInformationMessage(`${selected.label.split(':')[0]}: ${status} `);
+        log(`${selected.key} set to ${newValue} `);
     }
 }
 
@@ -544,13 +593,13 @@ async function discoverAntigravityCommands() {
         // Copy FULL output to clipboard
         await vscode.env.clipboard.writeText(output);
         vscode.window.showInformationMessage(
-            `Found ${retryCommands.length} retry, ${acceptCommands.length} accept, ${continueCommands.length} continue, ${chatCommands.length} chat commands. FULL LIST copied to clipboard!`
+            `Found ${retryCommands.length} retry, ${acceptCommands.length} accept, ${continueCommands.length} continue, ${chatCommands.length} chat commands.FULL LIST copied to clipboard!`
         );
 
         log(`Discovered commands - copied full list to clipboard`);
     } catch (e) {
-        vscode.window.showErrorMessage(`Error discovering commands: ${e.message}`);
-        log(`Error discovering commands: ${e.message}`);
+        vscode.window.showErrorMessage(`Error discovering commands: ${e.message} `);
+        log(`Error discovering commands: ${e.message} `);
     }
 }
 
