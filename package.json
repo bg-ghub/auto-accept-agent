@@ -1,8 +1,8 @@
 {
     "name": "auto-accept-agent",
     "displayName": "Auto Accept Agent",
-    "description": "Automatically accepts Antigravity agent steps. Simple, safe, and private - no tracking, no network calls.",
-    "version": "1.6.7",
+    "description": "Automatically accepts Antigravity agent steps, terminal commands, and suggestions. Simple, safe, and private.",
+    "version": "2.1.0",
     "publisher": "bg-ghub",
     "icon": "media/icon.png",
     "repository": {
@@ -46,6 +46,22 @@
             {
                 "command": "auto-accept.openQuickSettings",
                 "title": "Auto Accept: Quick Settings"
+            },
+            {
+                "command": "auto-accept.diagnostics",
+                "title": "Auto Accept: Run Diagnostics"
+            },
+            {
+                "command": "auto-accept.showStatus",
+                "title": "Auto Accept: Show Patch Status"
+            },
+            {
+                "command": "auto-accept.applyPatch",
+                "title": "Auto Accept: Apply Auto-Run Fix"
+            },
+            {
+                "command": "auto-accept.revertPatch",
+                "title": "Auto Accept: Revert Auto-Run Fix"
             }
         ],
         "keybindings": [
@@ -75,6 +91,7 @@
                     "maximum": 5000,
                     "description": "Polling interval in milliseconds (100-5000)"
                 },
+
                 "auto-accept.acceptAgentSteps": {
                     "type": "boolean",
                     "default": true,
