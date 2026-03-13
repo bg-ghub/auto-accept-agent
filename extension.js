@@ -209,10 +209,12 @@ function startLoop() {
     // HIGH-FREQUENCY approval acceptor (200ms)
     const approvalCommands = [
         'notification.acceptPrimaryAction',
+        'notification.acceptSecondaryAction',
         'antigravity.agent.acceptAgentStep',
         'antigravity.terminalCommand.run',
         'antigravity.terminalCommand.accept',
         'antigravity.executeCascadeAction',
+        'antigravity.cascadeStart',
         'workbench.action.terminal.chat.runCommand',
         'workbench.action.terminal.chat.runFirstCommand',
         'chatEditing.acceptFile',
