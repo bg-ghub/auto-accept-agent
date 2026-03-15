@@ -2,7 +2,7 @@
     "name": "auto-accept-agent",
     "displayName": "Auto Accept Agent",
     "description": "Automatically accepts Antigravity agent steps, terminal commands, and suggestions. Simple, safe, and private.",
-    "version": "2.1.0",
+    "version": "2.4.0",
     "publisher": "bg-ghub",
     "icon": "media/icon.png",
     "repository": {

@@ -2,7 +2,7 @@ const vscode = require('vscode');
 const patcher = require('./lib/auto-run-patcher');
 
 // ============================================================
-// AUTO-ACCEPT AGENT v2.1.0 — Polling Edition
+// AUTO-ACCEPT AGENT v2.4.0 — Polling + Source Patch Edition
 //
 // Architecture:
 //   Lightweight command polling loop that auto-accepts agent
@@ -78,7 +78,7 @@ function activate(context) {
     outputChannel = vscode.window.createOutputChannel('Auto Accept Agent');
     context.subscriptions.push(outputChannel);
 
-    log('Activating Auto Accept Agent v2.1.0 (Polling Edition)...');
+    log('Activating Auto Accept Agent v2.4.0...');
 
     // Load saved state
     enabled = getConfig('enabled');
@@ -112,7 +112,8 @@ function activate(context) {
         })
     );
 
-    // Source patch disabled on startup — use "Auto Accept: Apply Auto-Run Fix" manually
+    // Source patch disabled on startup — can crash AG. Use manual apply:
+    // Ctrl+Shift+P → "Auto Accept: Apply Auto-Run Fix"
     // applyPatchSilent();
 
     // Start the polling loop if enabled
@@ -169,15 +170,15 @@ function updateStatusBar() {
     if (!statusBarItem) return;
 
     if (enabled) {
-        // Check if source patch is applied
         patcher.checkAll().then(results => {
             const anyPatched = results.some(r => r.patched);
+            const suffix = anyPatched ? ' (patched)' : ' (not patched)';
             if (anyPatched) {
-                statusBarItem.text = '$(check) Auto Accept: ON';
+                statusBarItem.text = `$(check) Auto Accept: ON${suffix}`;
                 statusBarItem.tooltip = 'Auto-Accept is running with source patch. Click to pause.';
                 statusBarItem.backgroundColor = undefined;
             } else {
-                statusBarItem.text = '$(warning) Auto Accept: ON (no patch)';
+                statusBarItem.text = `$(warning) Auto Accept: ON${suffix}`;
                 statusBarItem.tooltip = 'Running via polling only — apply source patch for background support.\nCtrl+Shift+P → "Auto Accept: Apply Auto-Run Fix"';
                 statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
             }
@@ -516,7 +517,7 @@ async function discoverAntigravityCommands() {
 async function runDiagnostics() {
     const config = vscode.workspace.getConfiguration('auto-accept');
     const lines = [
-        '=== AUTO-ACCEPT AGENT DIAGNOSTICS (v2.1.0) ===',
+        '=== AUTO-ACCEPT AGENT DIAGNOSTICS (v2.2.0) ===',
         `Time: ${new Date().toISOString()}`,
         '',
         '--- EXTENSION STATE ---',

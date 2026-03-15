@@ -4,8 +4,20 @@
 
 The Auto-Accept Agent includes two source-level patches that fix Antigravity's broken approval mechanisms:
 
-1. **Terminal Auto-Run** (workbench) — Fixes the broken "Always Proceed" policy by injecting a `useEffect` hook
-2. **File Access Auto-Approve** (jetskiAgent) — Auto-approves file access requests for workspace-relevant paths
+1. **Terminal Auto-Run** (workbench + mainRenderer) — Fixes the broken "Always Proceed" policy by injecting a `useEffect` hook
+2. **File Access Auto-Approve** (all 3 renderers) — Auto-approves file access requests for user-owned paths
+
+## Target Files
+
+AG uses **three renderer bundles** that each contain duplicated UI components:
+
+| File | Label | Patches Applied |
+|------|-------|-----------------|
+| `out/vs/workbench/workbench.desktop.main.js` | workbench | autorun + fileaccess |
+| `out/jetskiAgent/main.js` | jetskiAgent | fileaccess only |
+| `out/main.js` | mainRenderer | autorun + fileaccess |
+
+The jetskiAgent webview renders the chat panel where file access prompts appear. The workbench and mainRenderer contain the terminal step component for auto-run.
 
 ## Patch 1: Terminal Auto-Run
 
@@ -18,7 +30,6 @@ AG's terminal component has an `onChange` handler that sets the policy and calls
 Injects a `useEffect` hook after the component's variable declarations:
 
 ```javascript
-// Injected statement:
 /*AAA:autorun*/oiu(()=>{u===uF.EAGER&&!d&&b(!0)},[]);
 ```
 
@@ -29,70 +40,89 @@ Runs once on mount, checks if policy is EAGER and secure mode is off, then auto-
 - **Minified variable detection**: Regex matches code structure, not names
 - **Module scope resolution**: Dual strategy (scope-match + nearest-backward) with `define()` boundary counting as tiebreaker
 - **Insertion at semicolon boundary**: Walks forward tracking bracket depth to avoid breaking `const` declarations
-- **Target**: `workbench.desktop.main.js` only
+- **Targets**: `workbench.desktop.main.js` and `out/main.js`
 
 ## Patch 2: File Access Auto-Approve
 
 ### The Problem
 
-When the agent needs to access files outside the workspace, AG shows an "Expand" toolbar with "Allow file access to X?" requiring manual approval. No VS Code command or setting exists for this — it's entirely inside the jetskiAgent webview as a React component.
+When the agent needs to access files outside the workspace, AG shows an "Allow file access to X?" prompt requiring manual approval. No VS Code command or setting exists for this — it's inside the renderer as a React component.
 
 ### The Fix
 
-Injects a `setTimeout` callback after the file permission component's guard check:
+Injects code after the file permission component's `absolutePathUri` guard check:
 
 ```javascript
-// Injected statement:
-/*AAA:fileaccess*/setTimeout(()=>{
-  const _u = (t.absolutePathUri || '').toLowerCase();
-  const _ok = _u.includes('/documents/') ||
-              _u.includes('/appdata/') ||
-              _u.includes('/.gemini/') ||
-              _u.includes('/tmp/') ||
-              _u.includes('/temp/');
-  _ok && s(!0, Vee.CONVERSATION);
-}, 0);
+/*AAA:fileaccess*/if(((_p)=>{
+  const _n = _p.replace(new RegExp(String.fromCharCode(92,92),'g'),'/').toLowerCase();
+  return _n.includes('/users/') || _n.includes('/home/')
+      || _n.includes('/tmp/')   || _n.includes('/temp/');
+})(t?.absolutePathUri||'')) {
+  setTimeout(() => s(!0, Vee.CONVERSATION), 0);
+  return null;
+}
 ```
 
-### Path Scoping ("Need to Know")
+### Key Design Decisions
 
-Only auto-approves file access for workspace-relevant paths:
+- **`setTimeout(..., 0)`** — Schedules the approval call AFTER React render completes. Calling `s()` synchronously during render is a forbidden side effect that causes errors.
+- **`return null`** — Immediately hides the prompt UI (React renders nothing for null).
+- **`String.fromCharCode(92,92)`** — Creates `\\` regex pattern for backslash normalization. Avoids the multi-layer escape chain (patcher template → written file → JS engine).
+- **Dynamic variable detection** — The request variable (`t`, `e`, etc.) and permission function (`s`, `o`, `l`, etc.) are extracted from the minified code via regex, not hardcoded.
+- **Always strip + re-apply** — The patcher strips any existing fileaccess patch before injecting the current version. This prevents stale old patches from persisting across versions.
+
+### Allow-List (Path Scoping)
+
+Only auto-approves file access for user-owned paths:
 
 | Path Pattern | What It Covers |
 |-------------|----------------|
-| `/documents/` | Workspace projects (`C:/Users/X/Documents/`) |
-| `/appdata/` | Windows temp, AG config (`AppData/Local/Temp/`) |
-| `/.gemini/` | AG brain/config directories |
+| `/users/` | Windows home dirs (`C:\Users\X\...`) |
+| `/home/` | Linux/Mac home dirs (`/home/X/...`) |
 | `/tmp/` | Unix/WSL temp |
 | `/temp/` | Cross-platform temp |
 
-**Everything else** (Desktop, system dirs, etc.) still shows the manual approval prompt.
+**Everything else** (C:\Windows, C:\Program Files, etc.) still shows the manual approval prompt.
 
 ### Technical Details
 
-- **`t.absolutePathUri`** is a file URI (forward slashes), available in the component scope
+- **Guard pattern**: `if(!VAR?.absolutePathUri)return null;` — regex-matched to handle different minified variable names
+- **Permission function**: Extracted from the "Allow This Conversation" button's `onClick` handler
 - **Scope**: `CONVERSATION` — permission resets when session ends
-- **Target**: `jetskiAgent/main.js` only
+- **Targets**: All 3 renderer bundles
 
-## Label-Based Routing
+## Patch Lifecycle
 
-The patcher routes analysis by file type:
+### Idempotent Application
 
-| File | Patch Type | Why |
-|------|-----------|-----|
-| `workbench.desktop.main.js` | Terminal auto-run | Has the terminal policy component |
-| `jetskiAgent/main.js` | File access auto-approve | Has the file permission component |
+The patcher uses a **strip-and-reapply** strategy:
 
-This prevents false matches (jetskiAgent has a `useEffect` alias that's unreliable for terminal auto-run).
+1. Read the file
+2. Strip any existing `/*AAA:fileaccess*/` patch (handles all known variants)
+3. Analyze the clean code for injection points
+4. Inject the latest patch code
+5. Write the file
+
+This ensures the patch is always up-to-date, even after the patch logic changes between versions.
+
+### Strip Variants
+
+The stripper handles all historical patch formats:
+
+| Version | Pattern |
+|---------|---------|
+| v1 | `/*AAA:fileaccess*/setTimeout(()=>{...path filtering...},0);` |
+| v2 | `/*AAA:fileaccess*/setTimeout(()=>{...},0);return null;` |
+| v3 | `/*AAA:fileaccess*/setTimeout(()=>FN(!0,ENUM),0);return null;` |
+| v4 | `/*AAA:fileaccess*/FN(!0,ENUM);return null;` |
 
 ## Integrity Checks
 
 AG validates SHA-256 checksums in `product.json` on startup. The patcher:
-- Creates backups before modifying (`.aaa-backup`)
 - Computes new checksums using `base64` encoding with padding stripped
 - Uses **string replacement** on raw JSON to preserve exact formatting
 
-> **Note**: A cosmetic "corrupt installation" warning may appear. AG validates integrity beyond just `product.json`. This warning is harmless.
+> **Note**: A cosmetic "corrupt installation" warning may appear. This warning is harmless and can be dismissed.
 
 ## Usage
 
@@ -102,7 +132,7 @@ AG validates SHA-256 checksums in `product.json` on startup. The patcher:
 Ctrl+Shift+P → "Auto Accept: Apply Auto-Run Fix"
 ```
 
-Then **restart** Antigravity.
+Then **reload** (`Ctrl+Shift+P → Developer: Reload Window`).
 
 ### Revert
 
@@ -116,10 +146,6 @@ Ctrl+Shift+P → "Auto Accept: Revert Auto-Run Fix"
 Ctrl+Shift+P → "Auto Accept: Show Patch Status"
 ```
 
-### Re-Applying
-
-Running "Apply" when already patched will revert from backup and re-apply fresh.
-
 ## Dual Marker System
 
 | Marker | Patch |
@@ -131,8 +157,8 @@ Both markers are checked for patch detection and clean reversion.
 
 ## Safety
 
-- **Automatic backups**: Original files saved as `.aaa-backup`
-- **One-command revert**: Restores from backup and deletes backup files
-- **Path-scoped**: File access only auto-approves workspace-relevant paths
+- **Path-scoped**: File access only auto-approves user-owned paths
 - **Conversation-scoped**: File access permissions reset per session
-- **Re-apply safe**: Reverts cleanly before re-patching
+- **Always fresh**: Patches are stripped and re-applied to prevent stale code
+- **One-command revert**: Restores original files
+- **Status bar indicator**: Shows `(patched)` or `(not patched)` at all times
