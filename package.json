@@ -91,7 +91,6 @@
                     "maximum": 5000,
                     "description": "Polling interval in milliseconds (100-5000)"
                 },
-
                 "auto-accept.acceptAgentSteps": {
                     "type": "boolean",
                     "default": true,
