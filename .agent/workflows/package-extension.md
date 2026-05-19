@@ -52,6 +52,17 @@ npx @vscode/vsce package --no-dependencies
 
 The `--no-dependencies` flag prevents vsce from running `npm install --production`.
 
+### 5. Install and fix node_modules
+
+**CRITICAL:** Antigravity's `--install-extension` CLI strips `node_modules` during extraction.
+You MUST copy the `ws` module manually after every install:
+
+```powershell
+antigravity --install-extension auto-accept-agent-X.Y.Z.vsix --force
+# Then fix the stripped node_modules:
+Copy-Item -Recurse -Force 'node_modules\ws' "$env:USERPROFILE\.antigravity\extensions\bg-ghub.auto-accept-agent-X.Y.Z\node_modules\ws"
+```
+
 ## Post-Packaging Verification
 
 Check the new VSIX was created:

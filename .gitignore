@@ -2,3 +2,6 @@ node_modules/
 *.vsix
 .env
 dist/
+tmp/
+vsix-check/
+scratch/

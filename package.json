@@ -2,7 +2,7 @@
     "name": "auto-accept-agent",
     "displayName": "Auto Accept Agent",
     "description": "Automatically accepts Antigravity agent steps, terminal commands, and suggestions. Simple, safe, and private.",
-    "version": "2.4.0",
+    "version": "3.4.0",
     "publisher": "bg-ghub",
     "icon": "media/icon.png",
     "repository": {
@@ -62,6 +62,10 @@
             {
                 "command": "auto-accept.revertPatch",
                 "title": "Auto Accept: Revert Auto-Run Fix"
+            },
+            {
+                "command": "auto-accept.cdpStatus",
+                "title": "Auto Accept: CDP Status"
             }
         ],
         "keybindings": [
@@ -174,8 +178,42 @@
                         "reboot"
                     ],
                     "description": "List of dangerous command patterns to block (supports regex with /pattern/ syntax)"
+                },
+                "auto-accept.cdpPort": {
+                    "type": "number",
+                    "default": 9333,
+                    "minimum": 1024,
+                    "maximum": 65535,
+                    "description": "CDP remote debugging port (default 9333 to avoid conflict with AG Browser Control on 9222). Launch AG with --remote-debugging-port=PORT."
+                },
+                "auto-accept.autoRetryEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Auto-click Retry and Continue buttons when the cascade agent hits errors (circuit-breaker: max 3 per 60s)"
+                },
+                "auto-accept.blockedCdpCommands": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [],
+                    "description": "Terminal commands to block via CDP (word-boundary matching). The Run button will be disabled for these."
+                },
+                "auto-accept.allowedCdpCommands": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [],
+                    "description": "If set, ONLY these terminal commands are auto-run via CDP (whitelist mode)."
                 }
             }
         }
+    },
+    "dependencies": {
+        "ws": "^8.20.0"
+    },
+    "devDependencies": {
+        "@electron/asar": "^4.2.0"
     }
 }
