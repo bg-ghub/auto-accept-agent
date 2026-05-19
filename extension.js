@@ -5,7 +5,7 @@ const patcher = require('./lib/auto-run-patcher');
 const cdp = require('./lib/cdp-auto-accept');
 
 // ============================================================
-// AUTO-ACCEPT AGENT v2.9.5 — CDP Auto-Accept Integration
+// AUTO-ACCEPT AGENT v3.5.0 — CDP Auto-Accept Integration
 //
 // Architecture:
 //   Lightweight command polling loop that auto-accepts agent
@@ -154,7 +154,7 @@ function activate(context) {
         outputChannel = vscode.window.createOutputChannel('Auto Accept Agent');
         context.subscriptions.push(outputChannel);
 
-        log('Activating Auto Accept Agent v2.9.5...');
+        log('Activating Auto Accept Agent v3.5.0...');
         debugLog('Phase 2: Reading config');
 
         // Load saved state — default to true if unset
@@ -303,28 +303,43 @@ function updateStatusBar() {
     if (enabled) {
         const cdpStatus = cdp.getStatus();
         const cdpLabel = cdpStatus.connected ? ' | CDP ✓' : ' | CDP OFF';
-        
-        patcher.checkAll().then(results => {
-            const anyPatched = results.some(r => r.patched);
-            const suffix = anyPatched ? ' (patched)' : ' (not patched)';
-            if (anyPatched || cdpStatus.connected) {
-                statusBarItem.text = `$(check) Auto Accept: ON${suffix}${cdpLabel}`;
-                statusBarItem.tooltip = cdpStatus.connected 
-                    ? `Auto-Accept running with CDP (${cdpStatus.injectedTargets} targets). Click to pause.`
-                    : 'Auto-Accept is running with source patch. Click to pause.';
-                statusBarItem.backgroundColor = undefined;
-            } else {
-                statusBarItem.text = `$(warning) Auto Accept: ON${suffix}`;
-                statusBarItem.tooltip = 'Running via polling only — launch AG with --remote-debugging-port=9222 for CDP.\nCtrl+Shift+P → "Auto Accept: Apply Auto-Run Fix"';
-                statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-            }
-        }).catch(() => {
-            statusBarItem.text = `$(check) Auto Accept: ON${cdpLabel}`;
+
+        // Detect AG architecture to avoid misleading "not patched" on AG 2.0
+        const agPath = patcher.findAntigravityPath();
+        const arch = agPath ? patcher.detectArchitecture(agPath) : null;
+        const isModern = arch === patcher.ARCH_MODERN;
+
+        if (isModern) {
+            // AG 2.0: source patching doesn't apply — show clean status
+            statusBarItem.text = `$(check) Auto Accept: ON (AG 2.0)${cdpLabel}`;
             statusBarItem.tooltip = cdpStatus.connected 
-                ? `Auto-Accept running with CDP (${cdpStatus.injectedTargets} targets). Click to pause.`
-                : 'Auto-Accept is running. Click to pause.';
+                ? `Auto-Accept running with CDP on AG 2.0. Click to pause.`
+                : 'Auto-Accept running via polling on AG 2.0. Launch with --remote-debugging-port=9333 for CDP.';
             statusBarItem.backgroundColor = undefined;
-        });
+        } else {
+            // Legacy AG: check patch status
+            patcher.checkAll().then(results => {
+                const anyPatched = results.some(r => r.patched);
+                const suffix = anyPatched ? ' (patched)' : ' (not patched)';
+                if (anyPatched || cdpStatus.connected) {
+                    statusBarItem.text = `$(check) Auto Accept: ON${suffix}${cdpLabel}`;
+                    statusBarItem.tooltip = cdpStatus.connected 
+                        ? `Auto-Accept running with CDP. Click to pause.`
+                        : 'Auto-Accept is running with source patch. Click to pause.';
+                    statusBarItem.backgroundColor = undefined;
+                } else {
+                    statusBarItem.text = `$(warning) Auto Accept: ON${suffix}`;
+                    statusBarItem.tooltip = 'Running via polling only — launch AG with --remote-debugging-port=9333 for CDP.\nCtrl+Shift+P → "Auto Accept: Apply Auto-Run Fix"';
+                    statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+                }
+            }).catch(() => {
+                statusBarItem.text = `$(check) Auto Accept: ON${cdpLabel}`;
+                statusBarItem.tooltip = cdpStatus.connected 
+                    ? `Auto-Accept running with CDP. Click to pause.`
+                    : 'Auto-Accept is running. Click to pause.';
+                statusBarItem.backgroundColor = undefined;
+            });
+        }
     } else {
         statusBarItem.text = '$(circle-slash) Auto Accept: OFF';
         statusBarItem.tooltip = 'Auto-Accept is paused. Click to resume.';
@@ -383,8 +398,8 @@ function startLoop() {
     }, 200);
 
     // MAIN LOOP (500ms) — Step/command acceptance
-    // All commands verified against AG 1.21.9 (IDE 1.21.9) command registry.
-    // Commands removed in 1.21.9: antigravity.agent.acceptAgentStep,
+    // Commands verified against AG IDE 2.0.1 (VS Code engine 1.107.0).
+    // Commands removed in 1.21.9+: antigravity.agent.acceptAgentStep,
     // antigravity.terminalCommand.run/accept, antigravity.command.accept
     let mainTickCount = 0;
     autoAcceptInterval = setInterval(async () => {
@@ -813,7 +828,7 @@ async function discoverAntigravityCommands() {
 async function runDiagnostics() {
     const config = vscode.workspace.getConfiguration('auto-accept');
     const lines = [
-        '=== AUTO-ACCEPT AGENT DIAGNOSTICS (v2.2.0) ===',
+        '=== AUTO-ACCEPT AGENT DIAGNOSTICS (v3.5.0) ===',
         `Time: ${new Date().toISOString()}`,
         '',
         '--- EXTENSION STATE ---',
