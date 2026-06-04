@@ -1,240 +1,162 @@
-# Auto-Accept Agent: Alternative Approaches Research
+# Alternative Approaches — Auto-Accept Implementation
 
-> Research date: 2026-04-01  
-> AG version: 1.107.0 (IDE 1.21.9)
+> Original research: April 2026 (AG 1.21.9)
+> Updated: June 2026 (AG 2.0.4)
 
 ## Problem Statement
 
-The cascade agent's file edit tool calls get stuck in the "Editing 1 file" state in secondary 
-workspaces (e.g., WetWijzer). The VS Code command API cannot reach the cascade's internal 
-approval flow because it runs inside an isolated jetskiAgent webview.
-
-**Critical finding**: Even our own Gemini agent tools (`write_to_file`) hang when targeting a 
-different workspace — proving this is a system-level file access/approval issue, not just a 
-webview button problem.
+Antigravity agent requires manual approval for file edits, terminal commands, and
+file access. Multiple approaches were investigated and several are now combined
+in the production extension.
 
 ---
 
-## Approach 1: Chrome DevTools Protocol (CDP)
+## ✅ Approach 1: Command Polling (Primary)
 
-**How it works**: Community extensions connect directly to AG's internal browser runtime via CDP 
-websockets to monitor and manipulate the DOM.
+**Status: ACTIVE — Core of the extension**
 
-### Implementation
-1. Launch AG with `--remote-debugging-port=9222`
-2. Hit `http://127.0.0.1:9222/json/list` to discover debuggable targets
-3. Connect via WebSocket to jetskiAgent webview targets
-4. Inject a `MutationObserver` that watches for approval buttons
-5. Auto-click "Accept", "Run", "Allow" buttons when detected
+Fires VS Code commands at regular intervals to accept agent steps, terminal commands,
+suggestions, and notifications.
 
-### Button Patterns
-```javascript
-const ACCEPT_PATTERNS = [
-    { text: /^Accept$/i, context: 'accept-edit' },
-    { text: /^Accept All$/i, context: 'accept-all' },
-    { text: /^Run$/i, context: 'run-command' },
-    { text: /^Allow$/i, context: 'allow-access' },
-    { text: /^Always Allow$/i, context: 'always-allow' },
-    { text: /^Continue$/i, context: 'continue' },
-];
-```
+### Commands Used (AG IDE 2.0.2+)
+
+| Command | Category | Purpose |
+|---------|----------|---------|
+| `antigravity.acceptAgentStep` | Agent Steps | Accept cascade step (restored in 2.0.2) |
+| `antigravity.prioritized.agentAcceptFocusedHunk` | Agent Steps | Accept focused diff hunk |
+| `antigravity.prioritized.agentAcceptAllInFile` | Agent Steps | Accept all hunks in file |
+| `chatEditing.acceptFile` | File Edits | Accept single file edit |
+| `chatEditing.acceptAllFiles` | File Edits | Accept all pending file edits |
+| `workbench.action.terminal.chat.runCommand` | Terminal | Run terminal chat command |
+| `antigravity.acceptCompletion` | Suggestions | Accept code completion |
+| `antigravity.prioritized.supercompleteAccept` | Suggestions | Accept supercomplete |
+| `notification.acceptPrimaryAction` | Notifications | Accept notification (backstop) |
 
 ### Pros
-- Works for ALL approval types (file edits, terminal, file access)
-- Resilient to command registry changes between AG versions
-- Community-proven approach
-- Operates at the DOM level — same as a human clicking buttons
+- No special launch flags needed
+- Works when window is minimized
+- Zero external dependencies
+- Resilient to DOM changes
 
 ### Cons
-- Requires AG restart with `--remote-debugging-port` flag
-- Need to create custom launcher/shortcut
-- Slightly more complex (WebSocket connection management, target discovery)
-- Button text changes between AG versions could break matching
-
-### Community Examples
-- **"Antigravity Auto Accept"** by pesosz (Open VSX Registry)
-- **"YoloMode"** extension
-- **"Antigravity Greenlight"**
-
-### Status: CDP module created at `lib/cdp-auto-accept.js`
+- Polling delay (500ms default)
+- Some commands may be no-ops for webview-internal actions
+- Command registry changes between AG versions
 
 ---
 
-## Approach 2: Source-Level Patch (AcceptCascadeStep)
+## ✅ Approach 2: CDP Auto-Accept (Enhanced)
 
-**How it works**: Inject code directly into AG's bundled JavaScript to auto-dispatch the 
-"AcceptCascadeStep" action when a step enters the WAITING state.
+**Status: ACTIVE — Complements command polling**
 
-### Implementation
-The cascade step acceptance flow in `jetskiAgent/main.js`:
-```
-AcceptCascadeStep → sendUserInteraction() → host processes → file written
-```
+Connects via Chrome DevTools Protocol to observe the agent panel DOM in real-time.
 
-The React component that renders the "Accept" button receives:
-- `status === Da.WAITING` — step is waiting for user approval
-- `sendUserInteraction` — function to dispatch accept/reject
-
-A patch would auto-call `sendUserInteraction` with the accept action immediately 
-when the component mounts with `status === WAITING`, similar to how our existing 
-`filePermission` patch works:
-```javascript
-/*AAA:autostep*/setTimeout(()=>sendAccept(), 0); return null;
-```
-
-### Key Code Locations
-| Identifier | Offset | Purpose |
-|---|---|---|
-| `AcceptCascadeStep` (jetskiAgent) | 7905911 | Enum value definition |
-| `acceptCascadeStep` (jetskiAgent) | 8456998 | React component handling |
-| `CASCADE_CHAT_CLIENT_ACCEPT_CASCADE_STEP` | 10935114 | Command ID mapping |
-| `ACKNOWLEDGE_CASCADE_CODE_EDIT` | 7171259 | Telemetry event |
-
-### Command ID Mapping (workbench)
-```
-acceptCascadeStep → "antigravity.agent.acceptAgentStep"
-rejectCascadeStep → "antigravity.agent.rejectAgentStep"
-```
-
-Note: These IDs ARE in the workbench source but may not be registered as VS Code commands 
-until the agent panel activates — explaining why they weren't found in the command scan.
+### How It Works
+1. AG launched with `--remote-debugging-port=9333`
+2. Worker thread connects via `ws` WebSocket to webview targets
+3. Injects MutationObserver that watches for approval buttons
+4. Auto-clicks Accept/Run/Allow/Retry buttons when detected
 
 ### Pros
-- No external dependencies or special launch flags
-- Works immediately after patching
-- Already have the patching infrastructure (`lib/auto-run-patcher.js`)
+- Instant reaction (no polling delay)
+- Works for ALL button-based approvals
+- Error context detection prevents false retries
+- Circuit breaker prevents infinite retry loops
 
 ### Cons
-- **Fragile**: Breaks on every AG update (code offsets change)
-- **Risky**: Source patches can cause blank screen if corrupted
-- Requires reverse-engineering minified React component tree
-- Checksum mismatch triggers "corrupt installation" warning
+- Requires AG restart with CDP flag
+- `ws` module must be manually copied after VSIX install
+- Button text changes could break matching
 
 ---
 
-## Approach 3: Native AG Settings
+## ✅ Approach 3: Source Patching (Supplementary)
 
-**How it works**: Use built-in AG settings to reduce/eliminate approval prompts.
+**Status: ACTIVE — File access + auto-scroll + auto-expand**
 
-### Available Settings
+Modifies AG's bundled JavaScript to auto-approve specific interactions.
 
-| Setting Key | Values | Default | Effect |
-|---|---|---|---|
-| Terminal Allow List | Command prefixes | Empty | Auto-execute matching commands |
-| Terminal Deny List | Command prefixes | Empty | Block matching commands |
-| Artifact Review Policy | "Always Proceed" / "Request Review" | "Request Review" | Skip plan review |
-| `chat.tools.terminal.blockDetectedFileWrites` | `"never"`, `"outsideWorkspace"`, `"all"` | `"outsideWorkspace"` | Blocks file writes outside workspace |
-| `chat.editing.confirmEditRequestRemoval` | boolean | `true` | Confirm before removing edits |
+### Active Patches
+| Patch | Target | Purpose |
+|-------|--------|---------|
+| File Access | workbench, jetskiAgent | Auto-approve file access for user-owned paths |
+| Auto-Scroll | workbench | Force auto-scroll in chat panels |
+| Auto-Expand | jetskiAgent | Auto-expand "Step Requires Input" banners |
 
-### Critical Discovery: `blockDetectedFileWrites`
-The setting `chat.tools.terminal.blockDetectedFileWrites` defaults to `"outsideWorkspace"`. 
-This may be intercepting and blocking file writes to paths outside the current workspace.
-
-### How to Apply
-In `settings.json` or via Settings UI:
-```json
-{
-    "chat.tools.terminal.blockDetectedFileWrites": "never",
-    "chat.editing.confirmEditRequestRemoval": false
-}
-```
+### Retired Patches
+| Patch | Reason |
+|-------|--------|
+| Terminal Auto-Run | AG 2.0.2+ handles via `antigravity.acceptAgentStep` command |
 
 ### Pros
-- Native AG feature, no hacking required
-- Survives AG updates
-- Easy to configure
+- No CDP or launch flags needed for file access
+- Instant (runs in the React component lifecycle)
 
 ### Cons
-- May not cover all approval types
-- Some settings may not exist in all AG versions
-- The cascade step approval is NOT controlled by any known setting
+- Breaks on AG updates (regex must be re-verified)
+- Checksum mismatch warning
+- Requires IDE reload after applying
 
 ---
 
-## Approach 4: Webview Message Injection
+## ✅ Approach 4: Native AG Settings
 
-**How it works**: Use VS Code's webview API to postMessage directly to the jetskiAgent panel.
+**Status: ACTIVE — Recommended first step**
 
-### Implementation Concept
-```javascript
-// From extension context:
-const panels = vscode.window.tabGroups.all.flatMap(g => g.tabs);
-// Find the agent panel and access its webview
-// Send: { type: "AcceptCascadeStep" } 
-```
+Use built-in AG settings to reduce approval prompts.
 
-### Pros
-- Uses VS Code's official extension API
-- No CDP port needed
-- Lighter than source patches
-
-### Cons
-- VS Code extensions can't access other extensions' webview panels
-- The jetskiAgent webview is owned by AG's built-in extension — inaccessible from 3rd party
-- Would require patching the webview host to expose a message channel
-
----
-
-## Approach 5: Keyboard Shortcut Simulation
-
-**How it works**: The cascade has a keybinding for `acceptCascadeStep`. Simulate that 
-keystroke programmatically.
-
-### Implementation
-The jetskiAgent source shows:
-```
-i?.getKeybindingLabel("acceptCascadeStep")
-```
-This means there IS a keybinding. The workbench maps it to `antigravity.agent.acceptAgentStep`.
-If we could find the default keybinding and simulate it, it might work.
-
-### Pros
-- Simple concept
-
-### Cons
-- Keybinding might not be assigned by default
-- Simulating keystrokes from an extension is hacky and unreliable
-- May require focus on the cascade panel
-
-## ✅ SOLUTION FOUND: Native AG Setting
-
-The root cause was the **"Agent Non-Workspace File Access"** setting, which defaults to `false`.
-
-### Setting Details
-
-| Setting | Internal Key | Default | Fix |
-|---|---|---|---|
-| **Agent Non-Workspace File Access** | `allowAgentAccessNonWorkspaceFiles` | `false` | Set to `true` |
-| Cached key | `cached.allowAgentAccessNonWorkspaceFiles` | `false` | Auto-set |
-
-### How to Enable
-**Settings UI**: Antigravity Settings → File Access → "Agent Non-Workspace File Access" → Toggle ON
-
-### What It Does
-When disabled (default), the cascade agent cannot view or edit files outside the current 
-workspace folder. This caused the "Editing 1 file +0 -0" stuck state when:
-- The agent conversation was in workspace A but tried to edit files in workspace B
-- Cross-workspace file edits from Gemini tools hung indefinitely
-- The cascade's diff engine couldn't compute changes for restricted files
-
-### Other Useful Settings (from the AG Settings UI)
+### Key Settings
 
 | Setting | Effect |
-|---|---|
-| Agent Gitignore Access | Allow agent to view/edit .gitignore files |
-| Auto-Open Edited Files | Open files in background when agent edits them |
-| Agent Auto-Fix Lints | Agent auto-fixes lint errors from its own edits |
+|---------|--------|
+| `allowAgentAccessNonWorkspaceFiles` = `true` | Allow agent to access files outside workspace |
+| Terminal Allow List | Auto-execute matching terminal commands |
+| Artifact Review Policy = "Always Proceed" | Skip plan review |
+| `chat.tools.terminal.blockDetectedFileWrites` = `"never"` | Don't block file writes |
+
+### Pros
+- Native, survives AG updates
+- Easy to configure
+- No extension needed
+
+### Cons
+- Doesn't cover all approval types (no setting for cascade step approval)
 
 ---
 
-## Recommendation (Updated)
+## ❌ Approach 5: Webview Message Injection
 
-**Primary fix**: Enable `allowAgentAccessNonWorkspaceFiles` in AG Settings UI ← **THIS SOLVED IT**  
-**Complementary**: CDP module for auto-clicking approval buttons (terminal, file access prompts)  
-**Complementary**: Source patch for auto-run terminal commands  
-**Avoid**: `blockDetectedFileWrites` setting alone was insufficient
+**Status: REJECTED**
 
-### Immediate Action Items
-1. ✅ Enable "Agent Non-Workspace File Access" in AG Settings
-2. ✅ Launch AG with `--remote-debugging-port=9222` for CDP support
-3. ✅ Install auto-accept extension v2.9.5 with CDP integration
+VS Code extensions can't access other extensions' webview panels.
+The jetskiAgent webview is owned by AG's built-in extension — inaccessible from 3rd party.
+
+---
+
+## ❌ Approach 6: Keyboard Shortcut Simulation
+
+**Status: REJECTED**
+
+Simulating keystrokes from an extension is unreliable and requires focus on the cascade panel.
+
+---
+
+## Production Architecture (v3.6.0)
+
+The extension combines approaches 1–4 in a layered architecture:
+
+```
+Layer 1: Native Settings (baseline)
+    └── Reduces approval prompts natively
+
+Layer 2: Command Polling (500ms MAIN + 1500ms SLOW)
+    └── Fires VS Code commands to accept steps/edits/suggestions
+
+Layer 3: CDP DOM Observer (real-time)
+    └── Watches webview DOM for buttons, auto-clicks
+
+Layer 4: Source Patches (one-time)
+    └── Auto-approves file access, forces auto-scroll
+```
+
+Each layer compensates for gaps in the others, providing near-100% automation coverage.
